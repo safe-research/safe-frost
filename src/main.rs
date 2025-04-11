@@ -1,10 +1,10 @@
 use argh::{FromArgValue, FromArgs};
-use elliptic_curve::sec1::ToEncodedPoint as _;
-use frost_secp256k1 as frost;
+use elliptic_curve::{hash2curve, sec1::ToEncodedPoint as _};
+use frost_secp256k1::{self as frost, Ciphersuite as _, Group as _};
 use sha3::{Digest as _, Keccak256};
 use std::{
     collections::BTreeMap,
-    fmt::{self, Display, Formatter, Write as _},
+    fmt::{self, Display, Formatter},
     str,
 };
 
@@ -24,9 +24,14 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = argh::from_env::<Args>();
+    // TODO(nlordell): use an actual RNG, just making deterministic to make
+    // testing easier during development.
+    //let mut rng = rand::thread_rng();
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(42);
 
-    let mut rng = rand::thread_rng();
-    let (shares, pubkey_package) = frost::keys::generate_with_dealer(
+    let secret = frost::SigningKey::new(&mut rng);
+    let (shares, pubkey_package) = frost::keys::split(
+        &secret,
         args.signers,
         args.threshold,
         frost::keys::IdentifierList::Default,
@@ -71,14 +76,83 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .is_ok(),
     );
 
+    println!("secret:    {}", Hex(&secret.serialize()));
     println!(
         "address:   {}",
         Address::from_verifying_key(pubkey_package.verifying_key()),
     );
     println!(
         "signature: {}",
-        "tod ads fa sdf as df asd fa sdf ads f asdf as df asd fa sdf a sdfo",
+        "------------------------------------------------------------------",
     );
+
+    println!(
+        "pubkey:    {}",
+        pubkey_package
+            .verifying_key()
+            .to_element()
+            .to_affine()
+            .to_encoded_point(false)
+    );
+    println!(
+        "R:         {}",
+        signature.R().to_affine().to_encoded_point(false)
+    );
+    println!("z:         {:?}", signature.z());
+    println!(
+        "preimage:  {}",
+        Hex(&{
+            let mut preimage = vec![];
+            preimage.extend_from_slice(frost::Secp256K1Group::serialize(signature.R())?.as_ref());
+            preimage.extend_from_slice(
+                frost::Secp256K1Group::serialize(&pubkey_package.verifying_key().to_element())?
+                    .as_ref(),
+            );
+            preimage.extend_from_slice(args.message.as_ref());
+            preimage
+        }),
+    );
+    println!(
+        "challenge: {:?}",
+        frost::Secp256K1Sha256::challenge(
+            signature.R(),
+            pubkey_package.verifying_key(),
+            args.message.as_ref()
+        )?,
+    );
+
+    println!("------------------------------------------------------------------");
+    use elliptic_curve::ops::Reduce;
+    fn scalar_from_hex(s: &str) -> k256::Scalar {
+        k256::Scalar::reduce(k256::U256::from_be_hex(s))
+    }
+    struct Point<'a>(&'a k256::ProjectivePoint);
+    impl Display for Point<'_> {
+        fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+            let p = self.0.to_encoded_point(false);
+            let x = k256::U256::from_be_slice(&p.as_bytes()[1..33]);
+            let y = k256::U256::from_be_slice(&p.as_bytes()[33..65]);
+            let a = Address(keccak256(&p.as_bytes()[1..])[12..].try_into().unwrap());
+            write!(f, "{{ x: 0x{x:032x}, y: 0x{y:032x}, a: {a:#} }}")
+        }
+    }
+    let s = scalar_from_hex("a22427226377cc867d51ad3f130af08ad13451de7160efa2b23076fd782de967");
+    let p = k256::AffinePoint::GENERATOR * s;
+    println!("P: {}", Point(&p));
+    let r = signature.R().clone();
+    println!("R: {}", Point(&r));
+    println!("-R: {}", Point(&(-r)));
+    let z = scalar_from_hex("5040882c2c74c66e02c8096493ea5991d06ccc2222f69243a061246412834829");
+    println!("z: 0x{:032x}", k256::U256::from(z));
+    println!("------------------------------------------------------------------");
+    let gz = k256::AffinePoint::GENERATOR * z;
+    println!("zG: {}", Point(&gz));
+    let pe =
+        -(p * scalar_from_hex("5403889d1ac64339558373d64c5eec355fb125f412b4de39fb9aef1f8a7fc52b"));
+    println!("-eP: {}", Point(&pe));
+    println!("R': {}", Point(&(gz + pe)));
+    // R:         04B4E9386C48280FA5B7E15C1130E7903492477255EBED3DBC43B2D17D0BE5667C204AFDF5D544311185E1ABD81A1B6A52FDC3674D5DE59F82C957B634D6779C4C
+    // z:         Scalar(Uint(0x5040882C2C74C66E02C8096493EA5991D06CCC2222F69243A061246412834829
 
     Ok(())
 }
@@ -129,11 +203,7 @@ impl Address {
 
 impl Display for Address {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let mut addr = String::with_capacity(40);
-        for byte in &self.0 {
-            write!(&mut addr, "{byte:02x}")?;
-        }
-
+        let addr = format!("{}", Hex(&self.0));
         let digest = keccak256(addr.as_bytes());
         let mut checksummed = *b"0x0000000000000000000000000000000000000000";
         for (i, (c, a)) in checksummed[2..].iter_mut().zip(addr.as_bytes()).enumerate() {
@@ -147,5 +217,19 @@ impl Display for Address {
         }
 
         f.write_str(str::from_utf8(&checksummed).unwrap())
+    }
+}
+
+struct Hex<'a>(&'a [u8]);
+
+impl Display for Hex<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        if f.alternate() {
+            f.write_str("0x")?;
+        }
+        for byte in self.0 {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
