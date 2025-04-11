@@ -1,6 +1,8 @@
+//! Sample Frost threshold signature generation.
+
 use argh::{FromArgValue, FromArgs};
-use elliptic_curve::{hash2curve, sec1::ToEncodedPoint as _};
-use frost_secp256k1::{self as frost, Ciphersuite as _, Group as _};
+use frost_secp256k1 as frost;
+use k256::elliptic_curve::sec1::ToEncodedPoint as _;
 use sha3::{Digest as _, Keccak256};
 use std::{
     collections::BTreeMap,
@@ -24,10 +26,18 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = argh::from_env::<Args>();
-    // TODO(nlordell): use an actual RNG, just making deterministic to make
-    // testing easier during development.
-    //let mut rng = rand::thread_rng();
-    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(42);
+    let mut rng = rand::thread_rng();
+
+    // First things first, generate a secret and, from this secret split it
+    // into `args.signers` shares with a threshold of `args.threshold`.
+    //
+    // In the real world - this part is kind of complicated as _either_:
+    // - You trust a single party to generate a secret and split it into shares
+    //   before distributing them to each signer
+    // - You use a distributed key generation protocol to trustlessly set up
+    //   key shares across the various signers [0]
+    //
+    // [0]: <https://frost.zfnd.org/tutorial/dkg.html>
 
     let secret = frost::SigningKey::new(&mut rng);
     let (shares, pubkey_package) = frost::keys::split(
@@ -38,6 +48,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut rng,
     )?;
 
+    // # Round 1
+    //
+    // Now, you perform round 1 of the FROST threshold signature scheme and
+    // build the "signing package".
+    //
+    // Each Participant (i.e. key share holder) computes random nonces and
+    // signing commitments. The commitments are then sent over an authenticated
+    // channel (which needs to further be encrypted in case a secret message is
+    // being signed) to the Coordinator. The nonces are kept secret to each
+    // Participant and will be used later.
+    //
+    // As a small point of clarification, each Participant generates nonces and
+    // commitments _plural_. Both nonces and commitments are generated as a pair
+    // of hiding and binding values.
+    //
     // NOTE: for demonstration purposes, just use the first `threshold` signers.
 
     let round1 = shares
@@ -49,6 +74,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect::<Vec<_>>();
 
+    // Once a threshold of signing commitments are collected, a signing package
+    // can be created for collecting signatures from the committed Participants.
+    // The Coordinator prepares this signing package and sends it over an
+    // authenticated channel to each Participant (again, the channel needs to be
+    // encrypted in case the message being signed is secret).
+
     let signing_package = frost::SigningPackage::new(
         round1
             .iter()
@@ -56,6 +87,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect(),
         args.message.as_ref(),
     );
+
+    // # Round 2
+    //
+    // Once the signing package is ready and distributed to the Participants,
+    // each can perform their round 2 signature over:
+    // - The signing package
+    // - The randomly generated nonces from round 1
+    // - The secret share
+    //
+    // The Participant sends their signature share with the Coordinator over,
+    // you guessed it, an authenticated (and possible encrypted) channel.
 
     let signature_shares = round1
         .iter()
@@ -67,59 +109,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect::<Result<BTreeMap<_, _>, frost::Error>>()?;
 
-    let signature = frost::aggregate(&signing_package, &signature_shares, &pubkey_package)?;
+    // Once the threshold of signature shares have been collected, the
+    // Coordinator can generate a Schnorr signature.
 
+    let signature = frost::aggregate(&signing_package, &signature_shares, &pubkey_package)?;
     assert!(
         pubkey_package
             .verifying_key()
-            .verify(&args.message.as_ref(), &signature)
+            .verify(args.message.as_ref(), &signature)
             .is_ok(),
     );
 
-    println!("secret:    {}", Hex(&secret.serialize()));
+    println!("---------------------------------------------------------------------");
+    let address = Address::from_key(pubkey_package.verifying_key());
+    println!("address:    {address}");
+    let public_key = Coord::from_key(pubkey_package.verifying_key());
+    println!("public key: {public_key}");
+    let r = Coord::from_point(signature.R());
+    let z = U256::from_scalar(signature.z());
+    println!("signature:  {r}");
+    println!("            {z}");
+    println!("---------------------------------------------------------------------");
     println!(
-        "address:   {}",
-        Address::from_verifying_key(pubkey_package.verifying_key()),
+        "Frost.verify({}, {}, {}, {}, {}, {}) == {}",
+        args.message, public_key.x, public_key.y, r.x, r.y, z, address,
     );
-    println!(
-        "signature: {}",
-        "------------------------------------------------------------------",
-    );
+    println!("---------------------------------------------------------------------");
 
-    println!(
-        "pubkey:    {}",
-        pubkey_package
-            .verifying_key()
-            .to_element()
-            .to_affine()
-            .to_encoded_point(false)
-    );
-    println!(
-        "R:         {}",
-        signature.R().to_affine().to_encoded_point(false)
-    );
-    println!("z:         {:?}", signature.z());
-    println!(
-        "preimage:  {}",
-        Hex(&{
-            let mut preimage = vec![];
-            preimage.extend_from_slice(frost::Secp256K1Group::serialize(signature.R())?.as_ref());
-            preimage.extend_from_slice(
-                frost::Secp256K1Group::serialize(&pubkey_package.verifying_key().to_element())?
-                    .as_ref(),
-            );
-            preimage.extend_from_slice(args.message.as_ref());
-            preimage
-        }),
-    );
-    println!(
-        "challenge: {:?}",
-        frost::Secp256K1Sha256::challenge(
-            signature.R(),
-            pubkey_package.verifying_key(),
-            args.message.as_ref()
-        )?,
-    );
+    Ok(())
 }
 
 struct Message(Vec<u8>);
@@ -127,6 +144,12 @@ struct Message(Vec<u8>);
 impl AsRef<[u8]> for Message {
     fn as_ref(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl Display for Message {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{:#}", Hex(&self.0))
     }
 }
 
@@ -159,9 +182,9 @@ fn keccak256(bytes: &[u8]) -> [u8; 32] {
 struct Address([u8; 20]);
 
 impl Address {
-    fn from_verifying_key(pubkey: &frost::VerifyingKey) -> Self {
-        let point = pubkey.to_element().to_affine().to_encoded_point(false);
-        let bytes = keccak256(&point.as_bytes()[1..])[12..].try_into().unwrap();
+    fn from_key(pubkey: &frost::VerifyingKey) -> Self {
+        let p = pubkey.to_element().to_affine().to_encoded_point(false);
+        let bytes = keccak256(&p.as_bytes()[1..])[12..].try_into().unwrap();
         Self(bytes)
     }
 }
@@ -182,6 +205,48 @@ impl Display for Address {
         }
 
         f.write_str(str::from_utf8(&checksummed).unwrap())
+    }
+}
+
+struct U256(k256::U256);
+
+impl U256 {
+    fn from_bytes(b: &[u8]) -> Self {
+        Self(k256::U256::from_be_slice(b))
+    }
+
+    fn from_scalar(s: &k256::Scalar) -> Self {
+        Self(k256::U256::from(s))
+    }
+}
+
+impl Display for U256 {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "0x{:032x}", self.0)
+    }
+}
+
+struct Coord {
+    x: U256,
+    y: U256,
+}
+
+impl Coord {
+    fn from_key(pubkey: &frost::VerifyingKey) -> Self {
+        Self::from_point(&pubkey.to_element())
+    }
+
+    fn from_point(point: &k256::ProjectivePoint) -> Self {
+        let p = point.to_encoded_point(false);
+        let x = U256::from_bytes(&p.as_bytes()[1..33]);
+        let y = U256::from_bytes(&p.as_bytes()[33..65]);
+        Self { x, y }
+    }
+}
+
+impl Display for Coord {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{{{},{}}}", self.x, self.y)
     }
 }
 
