@@ -1,0 +1,11 @@
+[package]
+name = "safe-frost"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+argh = "0.1"
+elliptic-curve = "0.13"
+frost-secp256k1 = "2"
+rand = "0.8"
+sha3 = "0.10"
