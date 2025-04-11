@@ -4,6 +4,8 @@ This repository implements FROST(secp256k1, SHA-256) signature aggregation, and 
 
 **As of writing, signature verification is only ~5500 gas (with the optimizer enabled), which is crazy good!**
 
+:warning: **Code in this repository is not audited and may contain serious security holes; use at your own risk.** :warning:
+
 ## Usage
 
 ### Signing
