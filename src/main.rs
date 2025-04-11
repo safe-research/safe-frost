@@ -120,41 +120,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args.message.as_ref()
         )?,
     );
-
-    println!("------------------------------------------------------------------");
-    use elliptic_curve::ops::Reduce;
-    fn scalar_from_hex(s: &str) -> k256::Scalar {
-        k256::Scalar::reduce(k256::U256::from_be_hex(s))
-    }
-    struct Point<'a>(&'a k256::ProjectivePoint);
-    impl Display for Point<'_> {
-        fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-            let p = self.0.to_encoded_point(false);
-            let x = k256::U256::from_be_slice(&p.as_bytes()[1..33]);
-            let y = k256::U256::from_be_slice(&p.as_bytes()[33..65]);
-            let a = Address(keccak256(&p.as_bytes()[1..])[12..].try_into().unwrap());
-            write!(f, "{{ x: 0x{x:032x}, y: 0x{y:032x}, a: {a:#} }}")
-        }
-    }
-    let s = scalar_from_hex("a22427226377cc867d51ad3f130af08ad13451de7160efa2b23076fd782de967");
-    let p = k256::AffinePoint::GENERATOR * s;
-    println!("P: {}", Point(&p));
-    let r = signature.R().clone();
-    println!("R: {}", Point(&r));
-    println!("-R: {}", Point(&(-r)));
-    let z = scalar_from_hex("5040882c2c74c66e02c8096493ea5991d06ccc2222f69243a061246412834829");
-    println!("z: 0x{:032x}", k256::U256::from(z));
-    println!("------------------------------------------------------------------");
-    let gz = k256::AffinePoint::GENERATOR * z;
-    println!("zG: {}", Point(&gz));
-    let pe =
-        -(p * scalar_from_hex("5403889d1ac64339558373d64c5eec355fb125f412b4de39fb9aef1f8a7fc52b"));
-    println!("-eP: {}", Point(&pe));
-    println!("R': {}", Point(&(gz + pe)));
-    // R:         04B4E9386C48280FA5B7E15C1130E7903492477255EBED3DBC43B2D17D0BE5667C204AFDF5D544311185E1ABD81A1B6A52FDC3674D5DE59F82C957B634D6779C4C
-    // z:         Scalar(Uint(0x5040882C2C74C66E02C8096493EA5991D06CCC2222F69243A061246412834829
-
-    Ok(())
 }
 
 struct Message(Vec<u8>);
