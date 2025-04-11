@@ -276,7 +276,7 @@ library Frost {
         uint256 e = _challenge(rx, ry, px, py, message);
         unchecked {
             address minusR = _address(rx, _P - ry); // address(-R)
-            address minusRv = _ecmulmuladd(z, px, py, e);
+            address minusRv = _ecmulmuladd(z, px, py, e); // address(-z⋅G + e⋅P)
 
             signer = _address(px, py);
             assembly ("memory-safe") {
