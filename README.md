@@ -2,7 +2,7 @@
 
 This repository implements FROST(secp256k1, SHA-256) signature aggregation, and on-chain signature verification. Unlike other implementations, this one matches the FROST standard exactly without modifications to make it more efficient on the EVM.
 
-Note that signature verification is ~5500 gas (with the optimizer enabled), which is crazy good!
+**As of writing, signature verification is only ~5500 gas (with the optimizer enabled), which is crazy good!**
 
 ## Usage
 
