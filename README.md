@@ -38,7 +38,7 @@ Frost.verify(0x3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532,
 
 This signature can be verified on-chain with (with some formatting):
 
-```sol
+```solidity
 Frost.verify(
     0x3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532,
     0xdca18f3684bc5215cab42a1408349aa8c6c8c8618828c10f42c3267a2f244af2,
