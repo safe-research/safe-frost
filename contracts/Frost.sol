@@ -53,7 +53,8 @@ library Frost {
     /// @return result Whether the point is on the curve.
     function _isOnCurve(uint256 x, uint256 y) private pure returns (bool result) {
         assembly ("memory-safe") {
-            result := eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _N))
+            result :=
+                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _N)), and(lt(x, _P), lt(y, _P)))
         }
     }
 
@@ -219,36 +220,39 @@ library Frost {
         // Schnorr signature verification is fairly straight forward. Given:
         // - generator point `G`
         // - message bytes `MSG`
-        // - public key point `P` with x-coordinate `x`
-        // - signature point `R` with x-coordinate `r`
+        // - public key point `P`
+        // - signature point `R`
         // - signature scalar `z`
-        // - hashing function `H` (here H2 from the FROST(secp256k1, SHA-256)
-        //   specification - i.e. `_challenge`)
+        // - hashing function `H` (`H2` from the FROST(secp256k1, SHA-256)
+        //   specification - used in computing the signature `_challenge`)
         //
-        // Let `e` be the result of applying the hashing function `H` on the
-        // `message`:
-        //      e = H(r || x || MSG)
+        // Let `e` be the signature challenge computed by applying the hashing
+        // function `H` to `R`, `P` and `MSG` (note that for FROST, the points
+        // are encoded in SEC1 compressed form):
+        //      e = H(R || P || MSG)
         //
         // The goal is to show that:
-        //      z⋅G - H(r || x || MSG)⋅P = R
+        //      z⋅G - H(R || P || MSG)⋅P = R
         //                     z⋅G - e⋅P = R
         //
         // If we abuse the `ecrecover` mul-mul-add trick, we get a convienient
         // way of computing:
         //      address(-z⋅G + e⋅P) = address(-(z⋅G - e⋅P))
-        //                          = address(-(z⋅G - H(r || x || MSG)⋅P))
+        //                          = address(-(z⋅G - H(R || P || MSG)⋅P))
         //                          = address(-R)
         //
-        // We can trivially compute the additive inverse `-R` of `R`: you just
-        // need to compute the additive inverse of its `y` coordinate in the
-        // curve's finite field:
+        // We can trivially compute the additive inverse `-R` of `R`:
+        //      -R = {rx,-ry}
+        //
+        // This means you just need to compute the additive inverse of its
+        // y-coordinate `ry` in the curve's finite field:
         //      -ry = (_P - ry) % _P
         //          = _P - ry
         //
         // We can omit the modulus since `ry` is already an element of the
         // curve's finite field and thus in the range `[0, _P)`.
         //
-        // One caveat! Schnorr lacks standardization, and in some schemes you
+        // Note that Schnorr lacks standardization, and in some schemes you
         // compute `z⋅G - e⋅P = R` and in others `z⋅G + e⋅P = R`. The math
         // works out to the same in the end - you just need to be careful about
         // the sign of the scalars from the signature. FROST in particular uses
