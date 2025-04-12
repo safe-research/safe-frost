@@ -22,7 +22,7 @@ library Frost {
     /// @param x The x-coordinate of the point `P`.
     /// @param y The y-coordinate of the point `P`.
     /// @param e The scalar to multiple the point `P` with.
-    /// @return result The address corresponding to the point `z⋅G + e⋅P`.
+    /// @return result The address corresponding to the point `-z⋅G + e⋅P`.
     /// @custom:reference <https://ethresear.ch/t/you-can-kinda-abuse-ecrecover-to-do-ecmul-in-secp256k1-today/2384>
     function _ecmulmuladd(uint256 z, uint256 x, uint256 y, uint256 e) private view returns (address result) {
         assembly ("memory-safe") {
