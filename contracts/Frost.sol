@@ -13,7 +13,7 @@ library Frost {
     /// @notice Compute the mul-mul-add operation `-z⋅G + e⋅P` and return the
     /// hash of the resulting point.
     /// @dev This function uses a trick to abuse the `ecrecover` precompile in
-    /// order to compute a mul-mul-add operation of `z` times the curve
+    /// order to compute a mul-mul-add operation of `-z` times the curve
     /// generator point plus `e` time the point `P` defined by the coordinates
     /// `{x, y}`. The caveat with this trick is that it doesn't return the
     /// resulting point, but a public address (which is a truncated hash of the
