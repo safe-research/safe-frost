@@ -1,29 +1,36 @@
 //! Sample Frost threshold signature generation.
 
-use argh::{FromArgValue, FromArgs};
-use frost_secp256k1 as frost;
-use k256::elliptic_curve::sec1::ToEncodedPoint as _;
-use sha3::{Digest as _, Keccak256};
-use std::{
-    collections::BTreeMap,
-    fmt::{self, Display, Formatter},
-    str,
-};
+mod address;
+mod cmd;
+mod fmt;
+mod hex;
+mod keccak;
+
+use argh::FromArgs;
 
 #[derive(FromArgs)]
 /// generate a FROST threshold signature
 struct Args {
-    /// signer threshold
-    #[argh(option, default = "50")]
-    threshold: u16,
-    /// signer count
-    #[argh(option, default = "100")]
-    signers: u16,
-    /// the message to sign
-    #[argh(positional)]
-    message: Message,
+    #[argh(subcommand)]
+    subcommand: cmd::Subcommand,
 }
 
+fn main() {
+    use cmd::Subcommand::*;
+
+    let args = argh::from_env::<Args>();
+    let result = match args.subcommand {
+        Info(info) => info.run(),
+        Split(split) => split.run(),
+    };
+
+    if let Err(err) = result {
+        eprintln!("ERROR: {err}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(any())]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = argh::from_env::<Args>();
     let mut rng = rand::thread_rng();
@@ -137,129 +144,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("---------------------------------------------------------------------");
 
     Ok(())
-}
-
-struct Message(Vec<u8>);
-
-impl AsRef<[u8]> for Message {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl Display for Message {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{:#}", Hex(&self.0))
-    }
-}
-
-impl FromArgValue for Message {
-    fn from_arg_value(value: &str) -> Result<Self, String> {
-        let hex = value.strip_prefix("0x").unwrap_or(value);
-        if hex.len() % 2 != 0 {
-            return Err("odd number of hex digits".to_string());
-        }
-        let nibble = |b: u8| match b {
-            b'0'..=b'9' => Ok(b - b'0'),
-            b'a'..=b'f' => Ok(b - b'a' + 10),
-            b'A'..=b'F' => Ok(b - b'A' + 10),
-            b => Err(format!("invalid hex digit {b:#02x}")),
-        };
-        hex.as_bytes()
-            .chunks(2)
-            .map(|b| Ok((nibble(b[0])? << 4) | nibble(b[1])?))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Message)
-    }
-}
-
-fn keccak256(bytes: &[u8]) -> [u8; 32] {
-    let mut hasher = Keccak256::new();
-    hasher.update(bytes);
-    hasher.finalize().into()
-}
-
-struct Address([u8; 20]);
-
-impl Address {
-    fn from_key(pubkey: &frost::VerifyingKey) -> Self {
-        let p = pubkey.to_element().to_affine().to_encoded_point(false);
-        let bytes = keccak256(&p.as_bytes()[1..])[12..].try_into().unwrap();
-        Self(bytes)
-    }
-}
-
-impl Display for Address {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let addr = format!("{}", Hex(&self.0));
-        let digest = keccak256(addr.as_bytes());
-        let mut checksummed = *b"0x0000000000000000000000000000000000000000";
-        for (i, (c, a)) in checksummed[2..].iter_mut().zip(addr.as_bytes()).enumerate() {
-            let byte = digest[i / 2];
-            let nibble = 0xf & if i % 2 == 0 { byte >> 4 } else { byte };
-            *c = if nibble >= 8 {
-                a.to_ascii_uppercase()
-            } else {
-                a.to_ascii_lowercase()
-            };
-        }
-
-        f.write_str(str::from_utf8(&checksummed).unwrap())
-    }
-}
-
-struct U256(k256::U256);
-
-impl U256 {
-    fn from_bytes(b: &[u8]) -> Self {
-        Self(k256::U256::from_be_slice(b))
-    }
-
-    fn from_scalar(s: &k256::Scalar) -> Self {
-        Self(k256::U256::from(s))
-    }
-}
-
-impl Display for U256 {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "0x{:032x}", self.0)
-    }
-}
-
-struct Coord {
-    x: U256,
-    y: U256,
-}
-
-impl Coord {
-    fn from_key(pubkey: &frost::VerifyingKey) -> Self {
-        Self::from_point(&pubkey.to_element())
-    }
-
-    fn from_point(point: &k256::ProjectivePoint) -> Self {
-        let p = point.to_encoded_point(false);
-        let x = U256::from_bytes(&p.as_bytes()[1..33]);
-        let y = U256::from_bytes(&p.as_bytes()[33..65]);
-        Self { x, y }
-    }
-}
-
-impl Display for Coord {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{{{},{}}}", self.x, self.y)
-    }
-}
-
-struct Hex<'a>(&'a [u8]);
-
-impl Display for Hex<'_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        if f.alternate() {
-            f.write_str("0x")?;
-        }
-        for byte in self.0 {
-            write!(f, "{byte:02x}")?;
-        }
-        Ok(())
-    }
 }

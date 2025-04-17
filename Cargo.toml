@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 argh = "0.1"
-frost-secp256k1 = "2"
+frost = { package = "frost-secp256k1", version = "2" }
+k256 = "0.13"
 rand = "0.8"
 sha3 = "0.10"
-k256 = "0.13"
