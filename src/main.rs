@@ -2,6 +2,7 @@
 
 mod address;
 mod cmd;
+mod data;
 mod fmt;
 mod hex;
 mod keccak;
@@ -16,15 +17,8 @@ struct Args {
 }
 
 fn main() {
-    use cmd::Subcommand::*;
-
     let args = argh::from_env::<Args>();
-    let result = match args.subcommand {
-        Info(info) => info.run(),
-        Split(split) => split.run(),
-    };
-
-    if let Err(err) = result {
+    if let Err(err) = args.subcommand.run() {
         eprintln!("ERROR: {err}");
         std::process::exit(1);
     }
