@@ -1,0 +1,8 @@
+[profile.default]
+src = "contracts"
+libs = ["lib"]
+test = "tests"
+out = "target/foundry"
+cache_path = "target/foundry/cache"
+
+solc_version = "0.8.29"

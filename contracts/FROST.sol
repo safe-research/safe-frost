@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-pragma solidity =0.8.29;
+pragma solidity ^0.8.29;
 
 /// @title FROST Library
 /// @notice Library for verifying FROST(secp256k1, SHA-256) signatures.
@@ -208,6 +208,8 @@ library FROST {
     /// @param px The x-coordinate of the public key point `P`.
     /// @param py The y-coordinate of the public key point `P`.
     /// @param z The z-scalar of the signature.
+    /// @return signer The address of the public key point `P`, or `0` if
+    /// signature verification failed.
     /// @custom:reference <https://datatracker.ietf.org/doc/html/rfc9591#section-6.5>
     /// @custom:reference <https://en.wikipedia.org/wiki/Schnorr_signature#Verifying>
     function verify(bytes32 message, uint256 px, uint256 py, uint256 rx, uint256 ry, uint256 z)
