@@ -4,7 +4,7 @@ pragma solidity =0.8.29;
 /// @title FROST Library
 /// @notice Library for verifying FROST(secp256k1, SHA-256) signatures.
 /// @custom:reference <https://datatracker.ietf.org/doc/html/rfc9591>
-library Frost {
+library FROST {
     /// @notice The secp256k1 prime field order.
     uint256 private constant _P = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f;
     /// @notice The secp256k1 curve order.
@@ -60,8 +60,8 @@ library Frost {
 
     /// @notice Checks whether an integer is a valid curve scalar.
     /// @param a The integer to check.
-    /// @return result Whether integer is a valid curve scalar in the
-    /// range `(0, _N)`.
+    /// @return result Whether integer is a valid curve scalar in the range
+    /// `(0, _N)`.
     function _isScalar(uint256 a) private pure returns (bool result) {
         assembly ("memory-safe") {
             result := and(gt(a, 0), lt(a, _N))

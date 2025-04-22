@@ -15,6 +15,11 @@ impl Address {
         let bytes = keccak::v256(&p.as_bytes()[1..])[12..].try_into().unwrap();
         Self(bytes)
     }
+
+    /// Returns the address as a slice of bytes.
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 impl Display for Address {
