@@ -2,11 +2,13 @@
 pragma solidity ^0.8.29;
 
 import {Test, Vm, console} from "forge-std/Test.sol";
-import {ISafe, ISafeProxyFactory, SafeDeployments, SafeOperation} from "./safe/deployments.sol";
+import {ISafe, ISafeProxyFactory, SafeDeployments} from "./safe/deployments.sol";
 import {SafeFROSTSigner} from "../contracts/SafeFROSTSigner.sol";
 import {SafeFROSTCoSigner} from "../contracts/SafeFROSTCoSigner.sol";
 
 contract ContractsTest is Test {
+    using SafeFROST for SafeFROST.CLI;
+
     ISafe singleton;
     ISafeProxyFactory proxyFactory;
 
@@ -17,7 +19,7 @@ contract ContractsTest is Test {
     /// @notice End-to-end test executing a Safe transaction authorized by a
     /// FROST signature.
     function test_SafeWithFROSTSigner() external {
-        cleanFROSTOutputDirectory();
+        SafeFROST.CLI memory safeFROST = SafeFROST.withRootDirectory(vm, "safe-owner");
 
         // First things first, generate a secret and, from this secret split it
         // into `--signers` shares with a threshold of `--threshold`.
@@ -29,10 +31,10 @@ contract ContractsTest is Test {
         //   key shares across the various signers [0]
         //
         // [0]: <https://frost.zfnd.org/tutorial/dkg.html>
-        safeFROST("split", "--threshold", "3", "--signers", "5");
+        safeFROST.exec("split", "--threshold", "3", "--signers", "5");
 
         (, uint256 px, uint256 py) =
-            abi.decode(safeFROST("info", "--abi-encode", "public-key"), (address, uint256, uint256));
+            abi.decode(safeFROST.exec("info", "--abi-encode", "public-key"), (address, uint256, uint256));
         SafeFROSTSigner signer = new SafeFROSTSigner(px, py);
 
         // Setup our Safe owned by a `SafeFROSTSigner` for the public key we
@@ -54,9 +56,8 @@ contract ContractsTest is Test {
 
         // We now want to sign a Safe transaction, so compute its hash and
         // choose `threshold` random participants for signing.
-        bytes32 transactionHash = safe.getTransactionHash(
-            address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), address(0), safe.nonce()
-        );
+        bytes32 transactionHash =
+            safe.getTransactionHash(address(safe), 0, "", 0, 0, 0, 0, address(0), address(0), safe.nonce());
         string[] memory participants = randomSigners(3, 5);
 
         // # Round 1
@@ -80,9 +81,9 @@ contract ContractsTest is Test {
         // channel needs to be encrypted in case the message being signed is
         // secret).
         for (uint256 i = 0; i < participants.length; i++) {
-            safeFROST("commit", "--share-index", participants[i]);
+            safeFROST.exec("commit", "--share-index", participants[i]);
         }
-        safeFROST("prepare", "--message", vm.toString(transactionHash));
+        safeFROST.exec("prepare", "--message", vm.toString(transactionHash));
 
         // # Round 2
         //
@@ -98,35 +99,33 @@ contract ContractsTest is Test {
         // Once the threshold of signature shares have been collected, the
         // Coordinator can generate a Schnorr signature.
         for (uint256 i = 0; i < participants.length; i++) {
-            safeFROST("sign", "--share-index", participants[i]);
+            safeFROST.exec("sign", "--share-index", participants[i]);
         }
-        safeFROST("aggregate");
+        safeFROST.exec("aggregate");
 
         // Finally, we use the aggregate signature for executing the Safe
         // transaction. The signature is the Solidity ABI encoded signature `R`
         // point coordinates and `z` scalar: `abi.encode(rx, ry, z)`.
-        bytes memory signature = safeFROST("info", "--abi-encode", "signature");
+        bytes memory signature = safeFROST.exec("info", "--abi-encode", "signature");
 
         bytes4 magicValue = bytes4(keccak256("isValidSignature(bytes32,bytes)"));
         assertEq(signer.isValidSignature(transactionHash, signature), magicValue);
 
         bytes memory signatures =
             abi.encodePacked(uint256(uint160(address(signer))), uint256(65), uint8(0), signature.length, signature);
-        safe.execTransaction(
-            address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), payable(address(0)), signatures
-        );
+        safe.execTransaction(address(safe), 0, "", 0, 0, 0, 0, address(0), payable(address(0)), signatures);
     }
 
     /// @notice End-to-end test executing a Safe transaction co-signed by a
     /// FROST signature.
     function test_SafeWithFROSTCoSigner() external {
-        cleanFROSTOutputDirectory();
+        SafeFROST.CLI memory safeFROST = SafeFROST.withRootDirectory(vm, "safe-co-signer");
 
         // Generate a secret and deploy a co-signer for it.
-        safeFROST("split", "--threshold", "3", "--signers", "5");
+        safeFROST.exec("split", "--threshold", "3", "--signers", "5");
 
         (, uint256 px, uint256 py) =
-            abi.decode(safeFROST("info", "--abi-encode", "public-key"), (address, uint256, uint256));
+            abi.decode(safeFROST.exec("info", "--abi-encode", "public-key"), (address, uint256, uint256));
         SafeFROSTCoSigner coSigner = new SafeFROSTCoSigner(px, py);
 
         // Create a new Safe account.
@@ -147,115 +146,41 @@ contract ContractsTest is Test {
 
         // Add the FROST co-signer as a guard.
         bytes memory approvedSignature = abi.encodePacked(uint256(uint160(address(this))), uint256(0), uint8(1));
+        bytes memory setGuardData = abi.encodeCall(safe.setGuard, (address(coSigner)));
         safe.execTransaction(
-            address(safe),
-            0,
-            abi.encodeCall(safe.setGuard, (address(coSigner))),
-            SafeOperation.CALL,
-            0,
-            0,
-            0,
-            address(0),
-            payable(address(0)),
-            approvedSignature
+            address(safe), 0, setGuardData, 0, 0, 0, 0, address(0), payable(address(0)), approvedSignature
         );
 
         // Prepare a transaction and chose random participants for signing.
-        bytes32 transactionHash = safe.getTransactionHash(
-            address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), address(0), safe.nonce()
-        );
+        bytes32 transactionHash =
+            safe.getTransactionHash(address(safe), 0, "", 0, 0, 0, 0, address(0), address(0), safe.nonce());
         string[] memory participants = randomSigners(3, 5);
 
         // Round 1.
         for (uint256 i = 0; i < participants.length; i++) {
-            safeFROST("commit", "--share-index", participants[i]);
+            safeFROST.exec("commit", "--share-index", participants[i]);
         }
-        safeFROST("prepare", "--message", vm.toString(transactionHash));
+        safeFROST.exec("prepare", "--message", vm.toString(transactionHash));
 
         // Round 2.
         for (uint256 i = 0; i < participants.length; i++) {
-            safeFROST("sign", "--share-index", participants[i]);
+            safeFROST.exec("sign", "--share-index", participants[i]);
         }
-        safeFROST("aggregate");
+        safeFROST.exec("aggregate");
 
         // Read the FROST co-signature.
-        bytes memory coSignature = safeFROST("info", "--abi-encode", "signature");
+        bytes memory coSignature = safeFROST.exec("info", "--abi-encode", "signature");
 
         // Execute the co-signed Safe transaction, the co-signature is appended to the transaction
         // signatures bytes.
         bytes memory signatures = abi.encodePacked(approvedSignature, coSignature);
-        safe.execTransaction(
-            address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), payable(address(0)), signatures
+        safe.execTransaction(address(safe), 0, "", 0, 0, 0, 0, address(0), payable(address(0)), signatures);
+
+        vm.prank(address(safe));
+        coSigner.checkTransaction(
+            address(safe), 0, "", 0, 0, 0, 0, address(0), payable(address(0)), signatures, address(this)
         );
-    }
-
-    function cleanFROSTOutputDirectory() internal {
-        string[] memory ffi = new string[](5);
-        ffi[0] = "git";
-        ffi[1] = "clean";
-        ffi[2] = "-Xf";
-        ffi[3] = "--";
-        ffi[4] = ".frost/";
-        vm.ffi(ffi);
-    }
-
-    function safeFROST(string memory subcommand, string[] memory options) internal returns (bytes memory) {
-        string[] memory ffi = new string[](5 + options.length);
-        ffi[0] = "cargo";
-        ffi[1] = "run";
-        ffi[2] = "-q";
-        ffi[3] = "--";
-        ffi[4] = subcommand;
-        for (uint256 i = 0; i < options.length; i++) {
-            ffi[5 + i] = options[i];
-        }
-        return vm.ffi(ffi);
-    }
-
-    function safeFROST(string memory subcommand) internal returns (bytes memory) {
-        return safeFROST(subcommand, new string[](0));
-    }
-
-    function safeFROST(string memory subcommand, string memory option1) internal returns (bytes memory) {
-        string[] memory options = new string[](1);
-        options[0] = option1;
-        return safeFROST(subcommand, options);
-    }
-
-    function safeFROST(string memory subcommand, string memory option1, string memory option2)
-        internal
-        returns (bytes memory)
-    {
-        string[] memory options = new string[](2);
-        options[0] = option1;
-        options[1] = option2;
-        return safeFROST(subcommand, options);
-    }
-
-    function safeFROST(string memory subcommand, string memory option1, string memory option2, string memory option3)
-        internal
-        returns (bytes memory)
-    {
-        string[] memory options = new string[](3);
-        options[0] = option1;
-        options[1] = option2;
-        options[2] = option3;
-        return safeFROST(subcommand, options);
-    }
-
-    function safeFROST(
-        string memory subcommand,
-        string memory option1,
-        string memory option2,
-        string memory option3,
-        string memory option4
-    ) internal returns (bytes memory) {
-        string[] memory options = new string[](4);
-        options[0] = option1;
-        options[1] = option2;
-        options[2] = option3;
-        options[3] = option4;
-        return safeFROST(subcommand, options);
+        coSigner.checkAfterExecution(transactionHash, true);
     }
 
     function randomSigners(uint256 threshold, uint256 count) internal returns (string[] memory signers) {
@@ -279,5 +204,89 @@ contract ContractsTest is Test {
         }
 
         return signers;
+    }
+}
+
+library SafeFROST {
+    struct CLI {
+        Vm vm;
+        string root;
+    }
+
+    function withRootDirectory(Vm vm, string memory tag) internal returns (CLI memory) {
+        string memory root = string(abi.encodePacked(".frost/", tag));
+        string[] memory ffi = new string[](5);
+        ffi[0] = "git";
+        ffi[1] = "clean";
+        ffi[2] = "-Xf";
+        ffi[3] = "--";
+        ffi[4] = root;
+        vm.ffi(ffi);
+        return CLI(vm, root);
+    }
+
+    function exec(CLI memory self, string memory subcommand, string[] memory options) internal returns (bytes memory) {
+        string[] memory ffi = new string[](7 + options.length);
+        ffi[0] = "cargo";
+        ffi[1] = "run";
+        ffi[2] = "-q";
+        ffi[3] = "--";
+        ffi[4] = "--root-directory";
+        ffi[5] = self.root;
+        ffi[6] = subcommand;
+        for (uint256 i = 0; i < options.length; i++) {
+            ffi[7 + i] = options[i];
+        }
+        return self.vm.ffi(ffi);
+    }
+
+    function exec(CLI memory self, string memory subcommand) internal returns (bytes memory) {
+        return exec(self, subcommand, new string[](0));
+    }
+
+    function exec(CLI memory self, string memory subcommand, string memory option1) internal returns (bytes memory) {
+        string[] memory options = new string[](1);
+        options[0] = option1;
+        return exec(self, subcommand, options);
+    }
+
+    function exec(CLI memory self, string memory subcommand, string memory option1, string memory option2)
+        internal
+        returns (bytes memory)
+    {
+        string[] memory options = new string[](2);
+        options[0] = option1;
+        options[1] = option2;
+        return exec(self, subcommand, options);
+    }
+
+    function exec(
+        CLI memory self,
+        string memory subcommand,
+        string memory option1,
+        string memory option2,
+        string memory option3
+    ) internal returns (bytes memory) {
+        string[] memory options = new string[](3);
+        options[0] = option1;
+        options[1] = option2;
+        options[2] = option3;
+        return exec(self, subcommand, options);
+    }
+
+    function exec(
+        CLI memory self,
+        string memory subcommand,
+        string memory option1,
+        string memory option2,
+        string memory option3,
+        string memory option4
+    ) internal returns (bytes memory) {
+        string[] memory options = new string[](4);
+        options[0] = option1;
+        options[1] = option2;
+        options[2] = option3;
+        options[3] = option4;
+        return exec(self, subcommand, options);
     }
 }

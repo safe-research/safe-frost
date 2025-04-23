@@ -1,6 +1,7 @@
 use rand::{Rng as _, seq::SliceRandom as _};
 use std::{
     fmt::Write as _,
+    path::Path,
     process::{Command, Stdio},
 };
 
@@ -9,53 +10,69 @@ use std::{
 /// For more details on the process, see `contracts.t.sol` end-to-end test.
 #[test]
 fn roundtrip() {
-    clean_frost_output_directory();
+    let safe_frost = SafeFrost::with_root_directory("roundtrip");
 
     // Generate a secret and prepare for the signing rounds.
-    safe_frost("split", &["--threshold", "3", "--signers", "5"]);
-    safe_frost("info", &["public-key"]);
+    safe_frost.exec("split", &["--threshold", "3", "--signers", "5"]);
+    safe_frost.exec("info", &["public-key"]);
 
     let message = random_message();
     let participants = random_signers(3, 5);
 
     // Round 1.
     for participant in &participants {
-        safe_frost("commit", &["--share-index", participant]);
+        safe_frost.exec("commit", &["--share-index", participant]);
     }
-    safe_frost("prepare", &["--message", &message]);
+    safe_frost.exec("prepare", &["--message", &message]);
 
     // Round 2.
     for participant in &participants {
-        safe_frost("sign", &["--share-index", participant]);
+        safe_frost.exec("sign", &["--share-index", participant]);
     }
-    safe_frost("aggregate", &[]);
+    safe_frost.exec("aggregate", &[]);
 
     // Verify the signature.
-    safe_frost("verify", &[]);
-    safe_frost("info", &["signature"]);
+    safe_frost.exec("verify", &[]);
+    safe_frost.exec("info", &["signature"]);
 }
 
-/// Cleans the `.frost/` directory.
-fn clean_frost_output_directory() {
-    let exit_code = Command::new("git")
-        .args(["clean", "-Xf", "--", ".frost/"])
-        .stdout(Stdio::null())
-        .status()
-        .expect("Failed to execute `git clean`");
-    assert!(exit_code.success(), "`git clean` command failed");
+struct SafeFrost {
+    root: String,
 }
 
-/// Execute the `safe-frost` CLI command.
-fn safe_frost(subcommand: &str, options: &[&str]) {
-    let output = Command::new("cargo")
-        .args(["run", "-q", "--"])
-        .arg(subcommand)
-        .args(options)
-        .stderr(Stdio::inherit())
-        .output()
-        .expect("Failed to execute `safe-frost`");
-    assert!(output.status.success(), "`safe-frost` command failed");
-    print!("{}", String::from_utf8_lossy(&output.stdout));
+impl SafeFrost {
+    fn with_root_directory(tag: &str) -> Self {
+        let root = Path::new(".frost")
+            .join(tag)
+            .into_os_string()
+            .into_string()
+            .unwrap();
+        let exit_code = Command::new("git")
+            .args(["clean", "-Xf", "--", &root])
+            .stdout(Stdio::null())
+            .status()
+            .expect("Failed to execute `git clean`");
+        assert!(exit_code.success(), "`git clean` command failed");
+        Self { root }
+    }
+
+    fn exec(&self, subcommand: &str, options: &[&str]) {
+        print!("$ safe-frost {subcommand}");
+        for option in options {
+            print!(" {option}");
+        }
+        println!();
+        let output = Command::new("cargo")
+            .args(["run", "-q", "--"])
+            .args(["--root-directory", &self.root])
+            .arg(subcommand)
+            .args(options)
+            .stderr(Stdio::inherit())
+            .output()
+            .expect("Failed to execute `safe-frost`");
+        assert!(output.status.success(), "`safe-frost` command failed");
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    }
 }
 
 /// Generates a random message for signing.

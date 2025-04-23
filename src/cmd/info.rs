@@ -1,10 +1,10 @@
 use crate::{
     address::Address,
-    cmd,
+    cmd::{self, Root},
     fmt::{Coord, Hex, Scalar},
 };
 use argh::FromArgs;
-use std::{fs, path::PathBuf};
+use std::fs;
 
 #[derive(FromArgs)]
 #[argh(subcommand, name = "info")]
@@ -29,26 +29,18 @@ enum Subcommand {
 #[derive(FromArgs)]
 #[argh(subcommand, name = "public-key")]
 /// display information of a FROST public key
-struct PublicKey {
-    /// public key file
-    #[argh(option, short = 'p', default = r#"".frost/key.pub".into()"#)]
-    public_key_path: PathBuf,
-}
+struct PublicKey {}
 
 #[derive(FromArgs)]
 #[argh(subcommand, name = "signature")]
 /// display information of a FROST signature
-struct Signature {
-    /// round-2 aggregate signature file
-    #[argh(option, short = '2', default = r#"".frost/round2".into()"#)]
-    signature_path: PathBuf,
-}
+struct Signature {}
 
 impl Command {
-    pub fn run(self) -> cmd::Result {
+    pub fn run(self, root: Root) -> cmd::Result {
         match self.subcommand {
-            Subcommand::PublicKey(cmd) => {
-                let data = fs::read(&cmd.public_key_path)?;
+            Subcommand::PublicKey(_) => {
+                let data = fs::read(root.public_key())?;
                 let key = frost::keys::PublicKeyPackage::deserialize(&data)?;
                 let key = key.verifying_key();
 
@@ -62,8 +54,8 @@ impl Command {
                     println!("public key: {}", Coord(&key.to_element()));
                 }
             }
-            Subcommand::Signature(cmd) => {
-                let data = fs::read(&cmd.signature_path)?;
+            Subcommand::Signature(_) => {
+                let data = fs::read(root.signature())?;
                 let signature = frost::Signature::deserialize(&data)?;
 
                 if self.abi_encode {

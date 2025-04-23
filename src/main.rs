@@ -14,11 +14,15 @@ use argh::FromArgs;
 struct Args {
     #[argh(subcommand)]
     subcommand: cmd::Subcommand,
+
+    /// the FROST root directory
+    #[argh(option, short = 'R', default = "cmd::Root::default()")]
+    root_directory: cmd::Root,
 }
 
 fn main() {
     let args = argh::from_env::<Args>();
-    if let Err(err) = args.subcommand.run() {
+    if let Err(err) = args.subcommand.run(args.root_directory) {
         eprintln!("ERROR: {err}");
         std::process::exit(1);
     }

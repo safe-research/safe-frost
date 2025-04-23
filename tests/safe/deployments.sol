@@ -3,11 +3,6 @@ pragma solidity ^0.8.29;
 
 import {Vm} from "forge-std/Vm.sol";
 
-enum SafeOperation {
-    CALL,
-    DELEGATECALL
-}
-
 interface ISafe {
     function setup(
         address[] calldata owners,
@@ -24,7 +19,7 @@ interface ISafe {
         address to,
         uint256 value,
         bytes calldata data,
-        SafeOperation operation,
+        uint8 operation,
         uint256 safeTxGas,
         uint256 baseGas,
         uint256 gasPrice,
@@ -37,7 +32,7 @@ interface ISafe {
         address to,
         uint256 value,
         bytes calldata data,
-        SafeOperation operation,
+        uint8 operation,
         uint256 safeTxGas,
         uint256 baseGas,
         uint256 gasPrice,

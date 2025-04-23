@@ -7,10 +7,7 @@ pub mod split;
 pub mod verify;
 
 use argh::{FromArgValue, FromArgs};
-use std::{
-    fmt::{self, Display, Formatter},
-    path::PathBuf,
-};
+use std::{fs, io, path::PathBuf};
 
 pub type Result = std::result::Result<(), anyhow::Error>;
 
@@ -27,62 +24,105 @@ pub enum Subcommand {
 }
 
 impl Subcommand {
-    pub fn run(self) -> Result {
+    pub fn run(self, root: Root) -> Result {
         match self {
-            Self::Info(cmd) => cmd.run(),
-            Self::Split(cmd) => cmd.run(),
-            Self::Commit(cmd) => cmd.run(),
-            Self::Prepare(cmd) => cmd.run(),
-            Self::Sign(cmd) => cmd.run(),
-            Self::Aggregate(cmd) => cmd.run(),
-            Self::Verify(cmd) => cmd.run(),
+            Self::Info(cmd) => cmd.run(root),
+            Self::Split(cmd) => cmd.run(root),
+            Self::Commit(cmd) => cmd.run(root),
+            Self::Prepare(cmd) => cmd.run(root),
+            Self::Sign(cmd) => cmd.run(root),
+            Self::Aggregate(cmd) => cmd.run(root),
+            Self::Verify(cmd) => cmd.run(root),
         }
     }
 }
 
-/// A format for paths on a share index.
-struct PathFormat(String);
+/// The FROST root directory.
+pub struct Root(PathBuf);
 
-impl PathFormat {
-    fn new(format: impl ToString) -> Option<Self> {
-        let format = format.to_string();
-        (format.as_bytes().iter().filter(|b| **b == b'%').count() == 1).then_some(Self(format))
+impl Root {
+    fn ensure(&self) -> io::Result<()> {
+        fs::create_dir_all(&self.0)
     }
 
-    fn signing_key() -> Self {
-        Self::new(".frost/key.%").unwrap()
+    fn public_key(&self) -> PathBuf {
+        self.0.join("key.pub")
     }
 
-    fn nonces() -> Self {
-        Self::new(".frost/round1.%.nonces").unwrap()
+    fn signing_key(&self, index: usize) -> PathBuf {
+        self.0.join(format!("key.{index}"))
     }
 
-    fn commitments() -> Self {
-        Self::new(".frost/round1.%.commitments").unwrap()
+    fn nonces(&self, index: usize) -> PathBuf {
+        self.0.join(format!("round1.{index}.nonces"))
     }
 
-    fn signature() -> Self {
-        Self::new(".frost/round2.%").unwrap()
+    fn commitments(&self, index: usize) -> PathBuf {
+        self.0.join(format!("round1.{index}.commitments"))
     }
 
-    fn for_index(&self, index: usize) -> PathBuf {
-        self.0.replace("%", &index.to_string()).into()
+    fn all_commitments(&self) -> io::Result<impl Iterator<Item = PathBuf>> {
+        let mut result = Vec::new();
+        for entry in self.0.read_dir()? {
+            let path = entry?.path();
+            if path
+                .file_name()
+                .and_then(|name| {
+                    name.to_str()?
+                        .strip_prefix("round1.")?
+                        .strip_suffix(".commitments")?
+                        .parse::<usize>()
+                        .ok()
+                })
+                .is_some()
+            {
+                result.push(path);
+            };
+        }
+        Ok(result.into_iter())
     }
 
-    fn files(&self) -> std::result::Result<glob::Paths, glob::PatternError> {
-        let pattern = self.0.replace("%", "*");
-        glob::glob(&pattern)
+    fn signing_package(&self) -> PathBuf {
+        self.0.join("round1")
+    }
+
+    fn signature_share(&self, index: usize) -> PathBuf {
+        self.0.join(format!("round2.{index}"))
+    }
+
+    fn all_signature_shares(&self) -> io::Result<impl Iterator<Item = PathBuf>> {
+        let mut result = Vec::new();
+        for entry in self.0.read_dir()? {
+            let path = entry?.path();
+            if path
+                .file_name()
+                .and_then(|name| {
+                    name.to_str()?
+                        .strip_prefix("round2.")?
+                        .parse::<usize>()
+                        .ok()
+                })
+                .is_some()
+            {
+                result.push(path);
+            };
+        }
+        Ok(result.into_iter())
+    }
+
+    fn signature(&self) -> PathBuf {
+        self.0.join("round2")
     }
 }
 
-impl Display for PathFormat {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.write_str(&self.0)
+impl Default for Root {
+    fn default() -> Self {
+        Self(PathBuf::from(".frost"))
     }
 }
 
-impl FromArgValue for PathFormat {
+impl FromArgValue for Root {
     fn from_arg_value(value: &str) -> std::result::Result<Self, String> {
-        Self::new(value).ok_or_else(|| "invalid path format".to_string())
+        Ok(Self(PathBuf::from(value)))
     }
 }

@@ -1,5 +1,0 @@
-# By default, the commands generate output to this directory. We don't want to
-# track those files, but make sure the directory is available for convenience.
-
-*
-!.gitignore

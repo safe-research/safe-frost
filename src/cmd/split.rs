@@ -1,12 +1,12 @@
 use crate::{
-    cmd::{self, PathFormat},
+    cmd::{self, Root},
     hex,
 };
 use argh::FromArgs;
 use std::{
     fs::File,
     io::{self, Write as _},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 #[derive(FromArgs)]
@@ -25,15 +25,6 @@ pub struct Command {
     #[argh(option, short = 'n', default = "5")]
     signers: u16,
 
-    /// public key output file
-    #[argh(option, short = 'p', default = r#"".frost/key.pub".into()"#)]
-    public_key_path: PathBuf,
-
-    /// signing key share output file format, the '%' will be replaced with
-    /// the share index
-    #[argh(option, short = 's', default = "PathFormat::signing_key()")]
-    signing_key_path: PathFormat,
-
     /// overwrite existing files, otherwise error if writing the public key or
     /// signing key share would overwrite an existing file
     #[argh(switch, short = 'f')]
@@ -41,7 +32,7 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn run(self) -> cmd::Result {
+    pub fn run(self, root: Root) -> cmd::Result {
         let mut rng = rand::thread_rng();
         let secret = self
             .secret_key
@@ -55,19 +46,17 @@ impl Command {
             &mut rng,
         )?;
 
-        self.write(&self.public_key_path, &pubkey_package.serialize()?)?;
+        root.ensure()?;
+        self.write(root.public_key(), &pubkey_package.serialize()?)?;
         for (index, (_, share)) in shares.into_iter().enumerate() {
             let key_package = frost::keys::KeyPackage::try_from(share)?;
-            self.write(
-                &self.signing_key_path.for_index(index),
-                &key_package.serialize()?,
-            )?;
+            self.write(root.signing_key(index), &key_package.serialize()?)?;
         }
 
         Ok(())
     }
 
-    fn write(&self, path: &Path, contents: &[u8]) -> Result<(), io::Error> {
+    fn write(&self, path: PathBuf, contents: &[u8]) -> Result<(), io::Error> {
         let mut file = if self.force {
             File::create(path)?
         } else {
