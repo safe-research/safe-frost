@@ -1,30 +1,208 @@
-// SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+// SPDX-License-Identifier: GPL-3.0-only
+pragma solidity ^0.8.29;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test, Vm, console} from "forge-std/Test.sol";
+import {ISafe, ISafeProxyFactory, SafeDeployments, SafeOperation} from "./safe/deployments.sol";
 import {SafeFROSTSigner} from "../contracts/SafeFROSTSigner.sol";
 
 contract ContractsTest is Test {
-    function setUp() external {}
+    ISafe singleton;
+    ISafeProxyFactory proxyFactory;
 
-    function test_Signer() external {
-        uint256 px = 0x4cab98e35c9c2803dee2aca757604414d7c73e5a2d0a7cc1fb0f2371856e7426;
-        uint256 py = 0x52bd6b2fb4c1e5bb10b06cfd01cd4fd70cad7604b880a4d4da9a3455cf240637;
+    function setUp() external {
+        (singleton, proxyFactory) = SafeDeployments.setUp(vm);
+    }
 
+    /// @notice End-to-end test executing a Safe transaction authorized by a
+    /// FROST signature.
+    function test_SafeWithFROSTSigner() external {
+        cleanFROSTOutputDirectory();
+
+        // First things first, generate a secret and, from this secret split it
+        // into `--signers` shares with a threshold of `--threshold`.
+        //
+        // In the real world - this part is kind of complicated as _either_:
+        // - You trust a single party to generate a secret and split it into
+        //   shares before distributing them to each signer
+        // - You use a distributed key generation protocol to trustlessly set up
+        //   key shares across the various signers [0]
+        //
+        // [0]: <https://frost.zfnd.org/tutorial/dkg.html>
+        safeFROST("split", "--threshold", "3", "--signers", "5");
+        (, uint256 px, uint256 py) =
+            abi.decode(safeFROST("info", "--abi-encode", "public-key"), (address, uint256, uint256));
+
+        // Setup our Safe owned by a `SafeFROSTSigner` for the public key we
+        // just generated.
         SafeFROSTSigner signer = new SafeFROSTSigner(px, py);
+        ISafe safe;
+        {
+            address[] memory owners = new address[](1);
+            owners[0] = address(signer);
+            safe = ISafe(
+                proxyFactory.createProxyWithNonce(
+                    address(singleton),
+                    abi.encodeCall(
+                        singleton.setup, (owners, 1, address(0), "", address(0), address(0), 0, payable(address(0)))
+                    ),
+                    vm.randomUint()
+                )
+            );
+        }
 
-        bytes memory messagePreimage = "Hello, FROST!";
-        bytes32 message = keccak256(messagePreimage);
+        // We now want to sign a Safe transaction, so compute its hash and
+        // choose `threshold` random participants for signing.
+        bytes32 transactionHash =
+            safe.getTransactionHash(address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), address(0), 0);
+        string[] memory participants = randomSigners(3, 5);
 
-        uint256 rx = 0xb9c35c1444e790346f9dde685ce3dd101a39623df1cbbd5a3b07c594f945ccac;
-        uint256 ry = 0xd982091c53df54a7e846316d07a6f79e3971795c694c2dedf9718c4c81a51de7;
-        uint256 z = 0x109c90aa8729baa999dbec6318e7ab32a44121ddf029141708e77b82ede02bfd;
-        bytes memory signature = abi.encode(rx, ry, z);
+        // # Round 1
+        //
+        // Now, you perform round 1 of the FROST threshold signature scheme and
+        // build the Signing Package.
+        //
+        // Each Participant (i.e. key share holder) computes random nonces and
+        // signing commitments. The commitments are then sent over an
+        // authenticated channel (which needs to further be encrypted in case a
+        // secret message is being signed) to the Coordinator. The nonces are
+        // kept secret to each Participant and will be used later. As a small
+        // point of clarification, each Participant generates nonces and
+        // commitments _plural_. Both nonces and commitments are generated as a
+        // pair of hiding and binding values.
+        //
+        // Once a threshold of signing commitments are collected, a signing
+        // package can be created for collecting signatures from the committed
+        // Participants. The Coordinator prepares this signing package and sends
+        // it over an authenticated channel to each Participant (again, the
+        // channel needs to be encrypted in case the message being signed is
+        // secret).
+        for (uint256 i = 0; i < participants.length; i++) {
+            safeFROST("commit", "--share-index", participants[i]);
+        }
+        safeFROST("prepare", "--message", vm.toString(transactionHash));
+
+        // # Round 2
+        //
+        // Once the Signing Package is ready and distributed to the Participants,
+        // each can perform their round 2 signature over:
+        // - The Signing Package from round 1
+        // - The randomly generated nonces from round 1
+        // - The secret share
+        //
+        // The Participant sends their signature share with the Coordinator over,
+        // you guessed it, an authenticated (and possible encrypted) channel.
+        //
+        // Once the threshold of signature shares have been collected, the
+        // Coordinator can generate a Schnorr signature.
+        for (uint256 i = 0; i < participants.length; i++) {
+            safeFROST("sign", "--share-index", participants[i]);
+        }
+        safeFROST("aggregate");
+
+        // Finally, we use the aggregate signature for executing the Safe
+        // transaction. The signature is the Solidity ABI encoded signature `R`
+        // point coordinates and `z` scalar: `abi.encode(rx, ry, z)`.
+        bytes memory signature = safeFROST("info", "--abi-encode", "signature");
 
         bytes4 magicValue = bytes4(keccak256("isValidSignature(bytes32,bytes)"));
-        assertEq(signer.isValidSignature(message, signature), magicValue);
+        assertEq(signer.isValidSignature(transactionHash, signature), magicValue);
 
-        bytes4 legacyMagicValue = bytes4(keccak256("isValidSignature(bytes,bytes)"));
-        assertEq(signer.isValidSignature(messagePreimage, signature), legacyMagicValue);
+        bytes memory signatures =
+            abi.encodePacked(uint256(uint160(address(signer))), uint256(65), uint8(0), signature.length, signature);
+        safe.execTransaction(
+            address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), payable(address(0)), signatures
+        );
+    }
+
+    function cleanFROSTOutputDirectory() internal {
+        string[] memory ffi = new string[](5);
+        ffi[0] = "git";
+        ffi[1] = "clean";
+        ffi[2] = "-Xf";
+        ffi[3] = "--";
+        ffi[4] = ".frost/";
+        vm.ffi(ffi);
+    }
+
+    function safeFROST(string memory subcommand, string[] memory options) internal returns (bytes memory) {
+        string[] memory ffi = new string[](5 + options.length);
+        ffi[0] = "cargo";
+        ffi[1] = "run";
+        ffi[2] = "-q";
+        ffi[3] = "--";
+        ffi[4] = subcommand;
+        for (uint256 i = 0; i < options.length; i++) {
+            ffi[5 + i] = options[i];
+        }
+        return vm.ffi(ffi);
+    }
+
+    function safeFROST(string memory subcommand) internal returns (bytes memory) {
+        return safeFROST(subcommand, new string[](0));
+    }
+
+    function safeFROST(string memory subcommand, string memory option1) internal returns (bytes memory) {
+        string[] memory options = new string[](1);
+        options[0] = option1;
+        return safeFROST(subcommand, options);
+    }
+
+    function safeFROST(string memory subcommand, string memory option1, string memory option2)
+        internal
+        returns (bytes memory)
+    {
+        string[] memory options = new string[](2);
+        options[0] = option1;
+        options[1] = option2;
+        return safeFROST(subcommand, options);
+    }
+
+    function safeFROST(string memory subcommand, string memory option1, string memory option2, string memory option3)
+        internal
+        returns (bytes memory)
+    {
+        string[] memory options = new string[](3);
+        options[0] = option1;
+        options[1] = option2;
+        options[2] = option3;
+        return safeFROST(subcommand, options);
+    }
+
+    function safeFROST(
+        string memory subcommand,
+        string memory option1,
+        string memory option2,
+        string memory option3,
+        string memory option4
+    ) internal returns (bytes memory) {
+        string[] memory options = new string[](4);
+        options[0] = option1;
+        options[1] = option2;
+        options[2] = option3;
+        options[3] = option4;
+        return safeFROST(subcommand, options);
+    }
+
+    function randomSigners(uint256 threshold, uint256 count) internal returns (string[] memory signers) {
+        assertLt(threshold, count);
+
+        signers = new string[](count);
+        for (uint256 i = 0; i < count; i++) {
+            signers[i] = vm.toString(i);
+        }
+
+        for (uint256 n = count - 1; n > 0; n--) {
+            uint256 i = vm.randomUint(0, n);
+
+            string memory temp = signers[i];
+            signers[i] = signers[n];
+            signers[n] = temp;
+        }
+
+        assembly ("memory-safe") {
+            mstore(signers, threshold)
+        }
+
+        return signers;
     }
 }
