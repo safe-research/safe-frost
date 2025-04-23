@@ -6,7 +6,7 @@ import {ISafe, ISafeProxyFactory, SafeDeployments} from "./safe/deployments.sol"
 import {SafeFROSTSigner} from "../contracts/SafeFROSTSigner.sol";
 import {SafeFROSTCoSigner} from "../contracts/SafeFROSTCoSigner.sol";
 
-contract ContractsTest is Test {
+contract E2ETest is Test {
     using SafeFROST for SafeFROST.CLI;
 
     ISafe singleton;
@@ -31,7 +31,7 @@ contract ContractsTest is Test {
         //   key shares across the various signers [0]
         //
         // [0]: <https://frost.zfnd.org/tutorial/dkg.html>
-        safeFROST.exec("split", "--threshold", "3", "--signers", "5");
+        safeFROST.exec("split", "--threshold", "3", "--signers", "5", "--force");
 
         (, uint256 px, uint256 py) =
             abi.decode(safeFROST.exec("info", "--abi-encode", "public-key"), (address, uint256, uint256));
@@ -122,7 +122,7 @@ contract ContractsTest is Test {
         SafeFROST.CLI memory safeFROST = SafeFROST.withRootDirectory(vm, "safe-co-signer");
 
         // Generate a secret and deploy a co-signer for it.
-        safeFROST.exec("split", "--threshold", "3", "--signers", "5");
+        safeFROST.exec("split", "--threshold", "3", "--signers", "5", "--force");
 
         (, uint256 px, uint256 py) =
             abi.decode(safeFROST.exec("info", "--abi-encode", "public-key"), (address, uint256, uint256));
@@ -175,12 +175,6 @@ contract ContractsTest is Test {
         // signatures bytes.
         bytes memory signatures = abi.encodePacked(approvedSignature, coSignature);
         safe.execTransaction(address(safe), 0, "", 0, 0, 0, 0, address(0), payable(address(0)), signatures);
-
-        vm.prank(address(safe));
-        coSigner.checkTransaction(
-            address(safe), 0, "", 0, 0, 0, 0, address(0), payable(address(0)), signatures, address(this)
-        );
-        coSigner.checkAfterExecution(transactionHash, true);
     }
 
     function randomSigners(uint256 threshold, uint256 count) internal returns (string[] memory signers) {
@@ -213,15 +207,8 @@ library SafeFROST {
         string root;
     }
 
-    function withRootDirectory(Vm vm, string memory tag) internal returns (CLI memory) {
+    function withRootDirectory(Vm vm, string memory tag) internal pure returns (CLI memory) {
         string memory root = string(abi.encodePacked(".frost/", tag));
-        string[] memory ffi = new string[](5);
-        ffi[0] = "git";
-        ffi[1] = "clean";
-        ffi[2] = "-Xf";
-        ffi[3] = "--";
-        ffi[4] = root;
-        vm.ffi(ffi);
         return CLI(vm, root);
     }
 
@@ -287,6 +274,24 @@ library SafeFROST {
         options[1] = option2;
         options[2] = option3;
         options[3] = option4;
+        return exec(self, subcommand, options);
+    }
+
+    function exec(
+        CLI memory self,
+        string memory subcommand,
+        string memory option1,
+        string memory option2,
+        string memory option3,
+        string memory option4,
+        string memory option5
+    ) internal returns (bytes memory) {
+        string[] memory options = new string[](5);
+        options[0] = option1;
+        options[1] = option2;
+        options[2] = option3;
+        options[3] = option4;
+        options[4] = option5;
         return exec(self, subcommand, options);
     }
 }

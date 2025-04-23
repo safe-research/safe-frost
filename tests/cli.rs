@@ -13,7 +13,7 @@ fn roundtrip() {
     let safe_frost = SafeFrost::with_root_directory("roundtrip");
 
     // Generate a secret and prepare for the signing rounds.
-    safe_frost.exec("split", &["--threshold", "3", "--signers", "5"]);
+    safe_frost.exec("split", &["--threshold", "3", "--signers", "5", "--force"]);
     safe_frost.exec("info", &["public-key"]);
 
     let message = random_message();
@@ -47,12 +47,6 @@ impl SafeFrost {
             .into_os_string()
             .into_string()
             .unwrap();
-        let exit_code = Command::new("git")
-            .args(["clean", "-Xf", "--", &root])
-            .stdout(Stdio::null())
-            .status()
-            .expect("Failed to execute `git clean`");
-        assert!(exit_code.success(), "`git clean` command failed");
         Self { root }
     }
 
