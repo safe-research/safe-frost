@@ -37,7 +37,7 @@ contract E2ETest is Test {
             abi.decode(safeFROST.exec("info", "--abi-encode", "public-key"), (address, uint256, uint256));
         SafeFROSTSigner signer = new SafeFROSTSigner(px, py);
 
-        // Setup our Safe owned by a `SafeFROSTSigner` for the public key we
+        // Set up our Safe owned by a `SafeFROSTSigner` for the public key we
         // just generated.
         ISafe safe;
         {
@@ -87,14 +87,15 @@ contract E2ETest is Test {
 
         // # Round 2
         //
-        // Once the Signing Package is ready and distributed to the Participants,
-        // each can perform their round 2 signature over:
+        // Once the Signing Package is ready and distributed to the
+        // Participants, each can perform their round 2 signature over:
         // - The Signing Package from round 1
         // - The randomly generated nonces from round 1
         // - The secret share
         //
-        // The Participant sends their signature share with the Coordinator over,
-        // you guessed it, an authenticated (and possible encrypted) channel.
+        // The Participant sends their signature share with the Coordinator
+        // over, you guessed it, an authenticated (and possibly encrypted)
+        // channel.
         //
         // Once the threshold of signature shares have been collected, the
         // Coordinator can generate a Schnorr signature.
