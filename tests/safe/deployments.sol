@@ -43,10 +43,12 @@ interface ISafe {
         uint256 gasPrice,
         address gasToken,
         address refundReceiver,
-        uint256 _nonce
+        uint256 nonce
     ) external view returns (bytes32);
 
     function setGuard(address guard) external;
+
+    function nonce() external view returns (uint256);
 }
 
 interface ISafeProxyFactory {

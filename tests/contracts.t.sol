@@ -4,6 +4,7 @@ pragma solidity ^0.8.29;
 import {Test, Vm, console} from "forge-std/Test.sol";
 import {ISafe, ISafeProxyFactory, SafeDeployments, SafeOperation} from "./safe/deployments.sol";
 import {SafeFROSTSigner} from "../contracts/SafeFROSTSigner.sol";
+import {SafeFROSTCoSigner} from "../contracts/SafeFROSTCoSigner.sol";
 
 contract ContractsTest is Test {
     ISafe singleton;
@@ -29,12 +30,13 @@ contract ContractsTest is Test {
         //
         // [0]: <https://frost.zfnd.org/tutorial/dkg.html>
         safeFROST("split", "--threshold", "3", "--signers", "5");
+
         (, uint256 px, uint256 py) =
             abi.decode(safeFROST("info", "--abi-encode", "public-key"), (address, uint256, uint256));
+        SafeFROSTSigner signer = new SafeFROSTSigner(px, py);
 
         // Setup our Safe owned by a `SafeFROSTSigner` for the public key we
         // just generated.
-        SafeFROSTSigner signer = new SafeFROSTSigner(px, py);
         ISafe safe;
         {
             address[] memory owners = new address[](1);
@@ -52,8 +54,9 @@ contract ContractsTest is Test {
 
         // We now want to sign a Safe transaction, so compute its hash and
         // choose `threshold` random participants for signing.
-        bytes32 transactionHash =
-            safe.getTransactionHash(address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), address(0), 0);
+        bytes32 transactionHash = safe.getTransactionHash(
+            address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), address(0), safe.nonce()
+        );
         string[] memory participants = randomSigners(3, 5);
 
         // # Round 1
@@ -109,6 +112,78 @@ contract ContractsTest is Test {
 
         bytes memory signatures =
             abi.encodePacked(uint256(uint160(address(signer))), uint256(65), uint8(0), signature.length, signature);
+        safe.execTransaction(
+            address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), payable(address(0)), signatures
+        );
+    }
+
+    /// @notice End-to-end test executing a Safe transaction co-signed by a
+    /// FROST signature.
+    function test_SafeWithFROSTCoSigner() external {
+        cleanFROSTOutputDirectory();
+
+        // Generate a secret and deploy a co-signer for it.
+        safeFROST("split", "--threshold", "3", "--signers", "5");
+
+        (, uint256 px, uint256 py) =
+            abi.decode(safeFROST("info", "--abi-encode", "public-key"), (address, uint256, uint256));
+        SafeFROSTCoSigner coSigner = new SafeFROSTCoSigner(px, py);
+
+        // Create a new Safe account.
+        ISafe safe;
+        {
+            address[] memory owners = new address[](1);
+            owners[0] = address(this);
+            safe = ISafe(
+                proxyFactory.createProxyWithNonce(
+                    address(singleton),
+                    abi.encodeCall(
+                        singleton.setup, (owners, 1, address(0), "", address(0), address(0), 0, payable(address(0)))
+                    ),
+                    vm.randomUint()
+                )
+            );
+        }
+
+        // Add the FROST co-signer as a guard.
+        bytes memory approvedSignature = abi.encodePacked(uint256(uint160(address(this))), uint256(0), uint8(1));
+        safe.execTransaction(
+            address(safe),
+            0,
+            abi.encodeCall(safe.setGuard, (address(coSigner))),
+            SafeOperation.CALL,
+            0,
+            0,
+            0,
+            address(0),
+            payable(address(0)),
+            approvedSignature
+        );
+
+        // Prepare a transaction and chose random participants for signing.
+        bytes32 transactionHash = safe.getTransactionHash(
+            address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), address(0), safe.nonce()
+        );
+        string[] memory participants = randomSigners(3, 5);
+
+        // Round 1.
+        for (uint256 i = 0; i < participants.length; i++) {
+            safeFROST("commit", "--share-index", participants[i]);
+        }
+        safeFROST("prepare", "--message", vm.toString(transactionHash));
+
+        // Round 2.
+        for (uint256 i = 0; i < participants.length; i++) {
+            safeFROST("sign", "--share-index", participants[i]);
+        }
+        safeFROST("aggregate");
+
+        // Read the FROST co-signature.
+        bytes memory coSignature = safeFROST("info", "--abi-encode", "signature");
+
+        // Execute the co-signed Safe transaction, the co-signature is appended to the transaction
+        // signatures bytes.
+        bytes memory signatures = abi.encodePacked(approvedSignature, coSignature);
         safe.execTransaction(
             address(safe), 0, "", SafeOperation.CALL, 0, 0, 0, address(0), payable(address(0)), signatures
         );
