@@ -240,8 +240,8 @@ library FROST {
         // If we abuse the `ecrecover` mul-mul-add trick, we get a convienient
         // way of computing:
         //      address(-z⋅G + e⋅P) = address(-(z⋅G - e⋅P))
-        //                          = address(-(z⋅G - H(R || P || MSG)⋅P))
-        //                          = address(-R)
+        //                         = address(-(z⋅G - H(R || P || MSG)⋅P))
+        //                         = address(-R)
         //
         // We can trivially compute the additive inverse `-R` of `R`:
         //      -R = {rx,-ry}
