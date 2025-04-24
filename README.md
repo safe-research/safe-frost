@@ -154,7 +154,13 @@ This signature can now be used to verify the `safeTxHash` message with the root 
 
 ### Examples
 
-The whole flow for signing a Safe transaction, both as an owner and as a co-signer, is documented as end-to-end tests in [`tests/e2e.t.sol`](tests/e2e.t.sol).
+The whole flow for signing a Safe transaction, both as an owner and as a co-signer, is documented as end-to-end tests in [`tests/e2e.t.sol`](tests/e2e.t.sol). They include detailed comments explaining what each step of the signing process is doing. The end-to-end tests can be executed with `forge`:
+
+```sh
+forge test --ffi
+```
+
+Note that the tests require `forge` FFI, in order to execute `safe-frost` CLI commands.
 
 ## Prior Art
 
