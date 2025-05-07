@@ -2,18 +2,25 @@
 pragma solidity ^0.8.29;
 
 import {Test, Vm, console} from "forge-std/Test.sol";
+import {FROSTAccount} from "contracts/FROSTAccount.sol";
+import {SafeFROSTSigner} from "contracts/SafeFROSTSigner.sol";
+import {SafeFROSTCoSigner} from "contracts/SafeFROSTCoSigner.sol";
 import {ISafe, ISafeProxyFactory, SafeDeployments} from "./safe/deployments.sol";
-import {SafeFROSTSigner} from "../contracts/SafeFROSTSigner.sol";
-import {SafeFROSTCoSigner} from "../contracts/SafeFROSTCoSigner.sol";
+import {IEntryPoint, ERC4337Deployments, PackedUserOperation} from "./erc4337/deployments.sol";
 
 contract E2ETest is Test {
     using SafeFROST for SafeFROST.CLI;
 
     ISafe singleton;
     ISafeProxyFactory proxyFactory;
+    IEntryPoint entryPoint;
+
+    FROSTAccount account;
 
     function setUp() external {
         (singleton, proxyFactory) = SafeDeployments.setUp(vm);
+        entryPoint = ERC4337Deployments.setUp(vm);
+        account = new FROSTAccount(address(entryPoint));
     }
 
     /// @notice End-to-end test executing a Safe transaction authorized by a
@@ -178,6 +185,71 @@ contract E2ETest is Test {
         safe.execTransaction(address(safe), 0, "", 0, 0, 0, 0, address(0), payable(address(0)), signatures);
     }
 
+    /// @notice End-to-end test executing an account-abstracted ERC-7702
+    /// multi-signature FROST transaction.
+    function test_FROSTAccount() external {
+        SafeFROST.CLI memory safeFROST = SafeFROST.withRootDirectory(vm, "account");
+
+        // Pick a private key, and delegate to the FROST account.
+        Vm.Wallet memory wallet = vm.createWallet("user");
+        vm.signAndAttachDelegation(address(account), wallet.privateKey);
+
+        // Split the private key into shares for signing user operations.
+        safeFROST.exec(
+            "split",
+            "--threshold",
+            "3",
+            "--signers",
+            "5",
+            "--force",
+            "--secret-key",
+            vm.toString(bytes32(wallet.privateKey))
+        );
+
+        (, uint256 px, uint256 py) =
+            abi.decode(safeFROST.exec("info", "--abi-encode", "public-key"), (address, uint256, uint256));
+
+        // Prepare a user operation and chose random participants for signing.
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: wallet.addr,
+            nonce: entryPoint.getNonce(wallet.addr, 0),
+            initCode: hex"7702",
+            callData: abi.encodeCall(account.execute, (wallet.addr, 0, "")),
+            accountGasLimits: bytes32(uint256((1000000 << 128) + 1000000)),
+            preVerificationGas: 1000000,
+            gasFees: bytes32(uint256((1 gwei << 128) + 1 gwei)),
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes32 userOpHash = entryPoint.getUserOpHash(userOp);
+        string[] memory participants = randomSigners(3, 5);
+
+        // Round 1.
+        for (uint256 i = 0; i < participants.length; i++) {
+            safeFROST.exec("commit", "--share-index", participants[i]);
+        }
+        safeFROST.exec("prepare", "--message", vm.toString(userOpHash));
+
+        // Round 2.
+        for (uint256 i = 0; i < participants.length; i++) {
+            safeFROST.exec("sign", "--share-index", participants[i]);
+        }
+        safeFROST.exec("aggregate");
+
+        // Read the FROST co-signature. Note that we additionally pack the group
+        // public key into the signature as it is needed for verification and
+        // not available to the delegated contract (since there is no setup
+        // function).
+        bytes memory signature = abi.encodePacked(px, py, safeFROST.exec("info", "--abi-encode", "signature"));
+
+        // Fund the account and execute the user operation.
+        vm.deal(wallet.addr, 1 ether);
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+        ops[0].signature = signature;
+        entryPoint.handleOps(ops, payable(wallet.addr));
+    }
+
     function randomSigners(uint256 threshold, uint256 count) internal returns (string[] memory signers) {
         assertLt(threshold, count);
 
@@ -293,6 +365,28 @@ library SafeFROST {
         options[2] = option3;
         options[3] = option4;
         options[4] = option5;
+        return exec(self, subcommand, options);
+    }
+
+    function exec(
+        CLI memory self,
+        string memory subcommand,
+        string memory option1,
+        string memory option2,
+        string memory option3,
+        string memory option4,
+        string memory option5,
+        string memory option6,
+        string memory option7
+    ) internal returns (bytes memory) {
+        string[] memory options = new string[](7);
+        options[0] = option1;
+        options[1] = option2;
+        options[2] = option3;
+        options[3] = option4;
+        options[4] = option5;
+        options[5] = option6;
+        options[6] = option7;
         return exec(self, subcommand, options);
     }
 }
