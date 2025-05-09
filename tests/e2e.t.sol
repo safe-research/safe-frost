@@ -206,9 +206,6 @@ contract E2ETest is Test {
             vm.toString(bytes32(wallet.privateKey))
         );
 
-        (, uint256 px, uint256 py) =
-            abi.decode(safeFROST.exec("info", "--abi-encode", "public-key"), (address, uint256, uint256));
-
         // Prepare a user operation and chose random participants for signing.
         PackedUserOperation memory userOp = PackedUserOperation({
             sender: wallet.addr,
@@ -240,7 +237,7 @@ contract E2ETest is Test {
         // public key into the signature as it is needed for verification and
         // not available to the delegated contract (since there is no setup
         // function).
-        bytes memory signature = abi.encodePacked(px, py, safeFROST.exec("info", "--abi-encode", "signature"));
+        bytes memory signature = safeFROST.exec("info", "--abi-encode", "signature", "--with-public-key");
 
         // Fund the account and execute the user operation.
         vm.deal(wallet.addr, 1 ether);

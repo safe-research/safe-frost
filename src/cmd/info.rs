@@ -14,7 +14,7 @@ pub struct Command {
     subcommand: Subcommand,
 
     /// output in Solidity ABI encoded format, intended for use with Foundry
-    /// `ffi` cheatcodes.
+    /// `ffi` cheatcodes
     #[argh(switch, short = 'e')]
     abi_encode: bool,
 }
@@ -34,7 +34,12 @@ struct PublicKey {}
 #[derive(FromArgs)]
 #[argh(subcommand, name = "signature")]
 /// display information of a FROST signature
-struct Signature {}
+struct Signature {
+    /// include the public key in the signature encoding; this is needed by the
+    /// EIP-7702 `FROSTAccount` implementation for signature verification
+    #[argh(switch, short = 'p')]
+    with_public_key: bool,
+}
 
 impl Command {
     pub fn run(self, root: Root) -> cmd::Result {
@@ -54,15 +59,30 @@ impl Command {
                     println!("public key: {}", Coord(&key.to_element()));
                 }
             }
-            Subcommand::Signature(_) => {
+            Subcommand::Signature(cmd) => {
                 let data = fs::read(root.signature())?;
                 let signature = frost::Signature::deserialize(&data)?;
 
+                let key = if cmd.with_public_key {
+                    let data = fs::read(root.public_key())?;
+                    Some(frost::keys::PublicKeyPackage::deserialize(&data)?)
+                } else {
+                    None
+                };
+                let key = key.as_ref().map(|key| key.verifying_key());
+
                 if self.abi_encode {
                     let mut buf = Vec::new();
+                    if let Some(key) = &key {
+                        buf.extend_from_slice(&abi::coord(&key.to_element()));
+                    }
                     buf.extend_from_slice(&abi::coord(signature.R()));
                     buf.extend_from_slice(&abi::scalar(signature.z()));
                     print!("{}", Hex(&buf))
+                } else if let Some(key) = &key {
+                    println!("public key: {}", Coord(&key.to_element()));
+                    println!("R:          {}", Coord(signature.R()));
+                    println!("z:          {}", Scalar(signature.z()));
                 } else {
                     println!("R: {}", Coord(signature.R()));
                     println!("z: {}", Scalar(signature.z()));
