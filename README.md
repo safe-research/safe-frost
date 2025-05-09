@@ -179,11 +179,11 @@ Since the `FROSTAccount` is an ERC-4337 account, instead of signing Safe transac
 bytes32 userOpHash = entryPoint.getUserOpHash(userOp);
 ```
 
-User operations are executed over the ERC-4337 entry contract and can take full advantage of the bundler network.
+User operations are executed over the ERC-4337 entry point contract and can take full advantage of the bundler network.
 
 #### Signature Format
 
-Other than a different signing message, the process for generating a signature is the same as generating one for a Safe transaction. In other words, both signing rounds need to be performed in the same way, but the `userOpHash` is used as the signing message instead of a `safeTxHash`. Additionally, because of how the account is implemented and since public keys are not computable for a given Ethereum public address, the user operation signature expects a slightly different format to the Safe owner. It is the encoded public key X and Y coordinates, packed with the usual FROST signature that is used for the Safe owner and co-signer:
+Other than a different signing message, the process for generating a signature is the same as generating one for a Safe transaction. In other words, both signing rounds need to be performed in the same way, but the `userOpHash` is used as the signing message instead of a `safeTxHash`. Additionally, because of how the account is implemented and since public keys are not computable for a given Ethereum public address, the user operation signature expects a slightly different format to the Safe owner. In particular, it expects the encoded public key X and Y coordinates, packed with the usual FROST signature that is used by the Safe owner and co-signer:
 
 ```solidity
 userOp.signature = abi.encodePacked(px, py, signature);
