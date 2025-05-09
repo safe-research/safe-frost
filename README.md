@@ -6,10 +6,11 @@ This repository implements a FROST(secp256k1, SHA-256) verifier for the EVM, as 
 
 As of writing, signature verification, regardless of the number of the threshold or number of shares, is only **~5600 gas** (with the optimizer enabled, only execution of the `FROST.verify` function itself excluding things like signature decoding and calldata cost), which is crazy good!
 
-`safe-frost` supports two main use cases of FROST signatures:
+`safe-frost` supports three main use cases of FROST signatures:
 
 - as a Safe signer
 - as a Safe co-signer
+- as a delegation target for EIP-7702, with ERC-4337 support
 
 ## Installation
 
@@ -33,7 +34,7 @@ Since the on-chain signature verifier follows the FROST standard, you can use an
 
 At its core, FROST is a threshold signature scheme. This means it allows splitting a root secret key into `n` shares for a threshold `t`, such that at least `t` participants need to cooperate to generate a signature that can be verified by the root public key. Here, we specifically implement FROST(secp256k1, SHA-256), meaning that the root secret key and public key are just a secp256k1 key pair (i.e. "regular Ethereum EOA").
 
-FROST only generates Schnorr signatures, and not ECDSA signatures (the standard on Ethereum), which is why additional EVM contracts are actually needed for verifying these signatures on-chain (instead of just using the `ecrecover` precompile). It is also important to note that FROST signatures are indistinguishable from normal signatures, so no one (including the verifier) can tell the difference between the root signing key and a threshold of shares producing a signature.
+FROST only generates Schnorr signatures, and not ECDSA signatures (the standard used by Ethereum), which is why additional EVM contracts are actually needed for verifying these signatures on-chain (instead of just using the `ecrecover` precompile or signing native Ethereum transactions). It is also important to note that FROST signatures are indistinguishable from normal signatures, so no one (including the verifier) can tell the difference between the root signing key and a threshold of shares producing a signature.
 
 ### Roles
 
@@ -152,9 +153,45 @@ safe-frost aggregate
 
 This signature can now be used to verify the `safeTxHash` message with the root public key and used for executing a Safe transaction!
 
+```sh
+safe-frost info --abi-encode signature
+```
+
+### EIP-7702 Delegation
+
+Once the account has signed and attached a delegation to the `FROSTAccount` contract by EIP-7702, FROST signatures can authorize ERC-4337 user operations on behalf of the account. Note that, since FROST(secp256k1, SHA-256) uses the same curve as Ethereum, the public key and address of the group are the same as the externally owned account (EOA). This essentially allows you to upgrade your existing EOA into a multi-signature account.
+
+#### Key Generation
+
+It is possible to split an existing private key into shares for use with the `FROSTAccount`:
+
+```sh
+safe-frost split --threshold 3 --signers 5 --secret-key $YOUR_PRIVATE_KEY
+```
+
+This will create a FROST group with the same public address as the EOA corresponding to the supplied private key.
+
+#### Setup
+
+Since the `FROSTAccount` is an ERC-4337 account, instead of signing Safe transactions, you would sign user operations:
+
+```solidity
+bytes32 userOpHash = entryPoint.getUserOpHash(userOp);
+```
+
+User operations are executed over the ERC-4337 entry contract and can take full advantage of the bundler network.
+
+#### Signature Format
+
+Other than a different signing message, the process for generating a signature is the same as generating one for a Safe transaction. In other words, both signing rounds need to be performed in the same way, but the `userOpHash` is used as the signing message instead of a `safeTxHash`. Additionally, because of how the account is implemented and since public keys are not computable for a given Ethereum public address, the user operation signature expects a slightly different format to the Safe owner. It is the encoded public key X and Y coordinates, packed with the usual FROST signature that is used for the Safe owner and co-signer:
+
+```solidity
+userOp.signature = abi.encodePacked(px, py, signature);
+```
+
 ### Examples
 
-The whole flow for signing a Safe transaction, both as an owner and as a co-signer, is documented as end-to-end tests in [`tests/e2e.t.sol`](tests/e2e.t.sol). They include detailed comments explaining what each step of the signing process is doing. The end-to-end tests can be executed with `forge`:
+The whole flow for signing a Safe transaction, both as an owner and as a co-signer, as well as signing a user operation, is documented as end-to-end tests in [`tests/e2e.t.sol`](tests/e2e.t.sol). They include detailed comments explaining what each step of the signing process is doing. The end-to-end tests can be executed with `forge`:
 
 ```sh
 forge test --ffi
