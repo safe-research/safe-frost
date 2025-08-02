@@ -17,6 +17,7 @@ contract SafeFROSTCoSigner is ISafeTransactionGuard {
     error Unauthorized();
 
     constructor(uint256 px, uint256 py) {
+        require(px < FROST._N && FROST._isOnCurve(px, py));
         _PX = px;
         _PY = py;
         _SIGNER = address(uint160(uint256(keccak256(abi.encode(px, py)))));

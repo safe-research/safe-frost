@@ -6,9 +6,9 @@ pragma solidity ^0.8.29;
 /// @custom:reference <https://datatracker.ietf.org/doc/html/rfc9591>
 library FROST {
     /// @notice The secp256k1 prime field order.
-    uint256 private constant _P = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f;
+    uint256 internal constant _P = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f;
     /// @notice The secp256k1 curve order.
-    uint256 private constant _N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141;
+    uint256 internal constant _N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141;
 
     /// @notice Compute the mul-mul-add operation `-z⋅G + e⋅P` and return the
     /// hash of the resulting point.
@@ -51,7 +51,7 @@ library FROST {
     /// @param x The x-coordinate of the point.
     /// @param y The y-coordinate of the point.
     /// @return result Whether the point is on the curve.
-    function _isOnCurve(uint256 x, uint256 y) private pure returns (bool result) {
+    function _isOnCurve(uint256 x, uint256 y) internal pure returns (bool result) {
         assembly ("memory-safe") {
             result :=
                 and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _N)), and(lt(x, _P), lt(y, _P)))
@@ -266,8 +266,12 @@ library FROST {
         // to a curve scalar, there are some values of `z` that can be
         // specified in more than one way.
         {
-            bool pOk = _isOnCurve(px, py);
+            // px must be in range [1, _N) because of ecrecover requirements
+            // px != 0 because of _isOnCurve(px, py) is false if px == 0
+            // (there is no point on the curve with x == 0)
+            bool pOk = px < _N && _isOnCurve(px, py);
             bool rOk = _isOnCurve(rx, ry);
+            // z must be in range [1, _N) because of ecrecover requirements
             bool zOk = _isScalar(z);
             bool ok;
             assembly ("memory-safe") {
@@ -279,7 +283,15 @@ library FROST {
             }
         }
 
+        // e must be in range [1, _N) because of ecrecover requirements
+        // e in range [0, _N) because of _hashToField
         uint256 e = _challenge(rx, ry, px, py, message);
+        //bool eOk = _isScalar(e);
+        bool eOk = e != 0;
+        if (!eOk) {
+            return address(0);
+        }
+
         unchecked {
             address minusR = _address(rx, _P - ry); // address(-R)
             address minusRv = _ecmulmuladd(z, px, py, e); // address(-z⋅G + e⋅P)
