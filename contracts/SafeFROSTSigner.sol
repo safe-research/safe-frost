@@ -15,7 +15,11 @@ contract SafeFROSTSigner is IERC1271, ILegacyERC1271 {
     /// @notice The public address of the signer.
     address private immutable _SIGNER;
 
+    /// @notice The public key is invalid or may result in the loss of funds.
+    error InvalidPublicKey();
+
     constructor(uint256 px, uint256 py) {
+        require(FROST.isValidPublicKey(px, py), InvalidPublicKey());
         _PX = px;
         _PY = py;
         _SIGNER = address(uint160(uint256(keccak256(abi.encode(px, py)))));

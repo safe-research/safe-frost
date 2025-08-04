@@ -54,7 +54,18 @@ library FROST {
     function _isOnCurve(uint256 x, uint256 y) private pure returns (bool result) {
         assembly ("memory-safe") {
             result :=
-                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _N)), and(lt(x, _P), lt(y, _P)))
+                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _P)), and(lt(x, _P), lt(y, _P)))
+        }
+    }
+
+    /// @notice Checks whether a point is on the curve and is a valid FROST public key.
+    /// @param x The x-coordinate of the point.
+    /// @param y The y-coordinate of the point.
+    /// @return result Whether the point is on the curve and is a valid FROST public key.
+    function isValidPublicKey(uint256 x, uint256 y) internal pure returns (bool result) {
+        assembly ("memory-safe") {
+            result :=
+                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _P)), and(lt(x, _N), lt(y, _P)))
         }
     }
 
@@ -208,10 +219,14 @@ library FROST {
     /// @param px The x-coordinate of the public key point `P`.
     /// @param py The y-coordinate of the public key point `P`.
     /// @param z The z-scalar of the signature.
+    /// @dev Note that `x` and `z` must be in the range `[1, _N)` for the math trick with `ecrecover` to work.
+    ///      You must use public keys that have been checked with `FROST.isValidPublicKey(px, py)`,
+    ///      as not all public keys are suitable for verifying Schnorr signatures.
     /// @return signer The address of the public key point `P`, or `0` if
     /// signature verification failed.
     /// @custom:reference <https://datatracker.ietf.org/doc/html/rfc9591#section-6.5>
     /// @custom:reference <https://en.wikipedia.org/wiki/Schnorr_signature#Verifying>
+    /// @custom:reference <https://ethresear.ch/t/you-can-kinda-abuse-ecrecover-to-do-ecmul-in-secp256k1-today/2384/19>
     function verify(bytes32 message, uint256 px, uint256 py, uint256 rx, uint256 ry, uint256 z)
         internal
         view
@@ -266,7 +281,7 @@ library FROST {
         // to a curve scalar, there are some values of `z` that can be
         // specified in more than one way.
         {
-            bool pOk = _isOnCurve(px, py);
+            bool pOk = isValidPublicKey(px, py);
             bool rOk = _isOnCurve(rx, ry);
             bool zOk = _isScalar(z);
             bool ok;
