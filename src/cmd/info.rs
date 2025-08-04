@@ -1,6 +1,7 @@
 use crate::{
     address::Address,
     cmd::{self, Root},
+    evm,
     fmt::{Coord, Hex, Scalar},
 };
 use argh::FromArgs;
@@ -47,7 +48,7 @@ impl Command {
             Subcommand::PublicKey(_) => {
                 let data = fs::read(root.public_key())?;
                 let key = frost::keys::PublicKeyPackage::deserialize(&data)?;
-                let key = key.verifying_key();
+                let key = evm::verified_public_key(&key)?;
 
                 if self.abi_encode {
                     let mut buf = Vec::new();
@@ -69,7 +70,7 @@ impl Command {
                 } else {
                     None
                 };
-                let key = key.as_ref().map(|key| key.verifying_key());
+                let key = key.as_ref().map(evm::verified_public_key).transpose()?;
 
                 if self.abi_encode {
                     let mut buf = Vec::new();

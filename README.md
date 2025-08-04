@@ -1,4 +1,5 @@
-:warning: **Code in this repository is not audited and may contain serious security holes; use at your own risk.** :warning:
+> [!WARNING]
+> Code in this repository is not audited and may contain serious security holes. Use at your own risk.
 
 # Safe + FROST
 
@@ -198,6 +199,10 @@ forge test --ffi
 ```
 
 Note that the tests require `forge` FFI, in order to execute `safe-frost` CLI commands.
+
+### Account Restrictions
+
+The `ecrecover` precompile is specified to only allow recovery IDs (the `v` value) that encode the y-parity of the signature `r` value, and not whether or not `R.x = r + secp256k1.n`. Since we pass in the account's public key as the signature `r` value, we cannot encode accounts with public keys that have x-coordinates that are in the range `[secp256k1.n, secp256k1.p)`. While this is _very_ unlikely (it requires roughly 128 bits of work to find such a key or a ~0.000000000000000000000000000000000000373% chance of occurring, assuming uniform distribution of x-coordinates of secp256k1 points), we added some special logic in the CLI application to not generate groups keys that have unsupported public keys. This limitation should be kept in mind when using other FROST implementations.
 
 ## Prior Art
 

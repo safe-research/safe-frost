@@ -3,6 +3,7 @@
 mod address;
 mod cmd;
 mod data;
+mod evm;
 mod fmt;
 mod hex;
 mod keccak;
