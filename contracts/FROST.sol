@@ -6,9 +6,9 @@ pragma solidity ^0.8.29;
 /// @custom:reference <https://datatracker.ietf.org/doc/html/rfc9591>
 library FROST {
     /// @notice The secp256k1 prime field order.
-    uint256 internal constant _P = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f;
+    uint256 private constant _P = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f;
     /// @notice The secp256k1 curve order.
-    uint256 internal constant _N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141;
+    uint256 private constant _N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141;
 
     /// @notice Compute the mul-mul-add operation `-z⋅G + e⋅P` and return the
     /// hash of the resulting point.
@@ -51,10 +51,21 @@ library FROST {
     /// @param x The x-coordinate of the point.
     /// @param y The y-coordinate of the point.
     /// @return result Whether the point is on the curve.
-    function _isOnCurve(uint256 x, uint256 y) internal pure returns (bool result) {
+    function _isOnCurve(uint256 x, uint256 y) private pure returns (bool result) {
         assembly ("memory-safe") {
             result :=
-                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _N)), and(lt(x, _P), lt(y, _P)))
+                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _P)), and(lt(x, _P), lt(y, _P)))
+        }
+    }
+
+    /// @notice Checks whether a point is on the curve and is a valid FROST public key.
+    /// @param x The x-coordinate of the point.
+    /// @param y The y-coordinate of the point.
+    /// @return result Whether the point is on the curve and is a valid FROST public key.
+    function isValidPublicKey(uint256 x, uint256 y) internal pure returns (bool result) {
+        assembly ("memory-safe") {
+            result :=
+                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _P)), and(lt(x, _N), lt(y, _P)))
         }
     }
 
