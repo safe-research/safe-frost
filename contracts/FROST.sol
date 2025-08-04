@@ -219,10 +219,14 @@ library FROST {
     /// @param px The x-coordinate of the public key point `P`.
     /// @param py The y-coordinate of the public key point `P`.
     /// @param z The z-scalar of the signature.
+    /// @dev Note that `x` and `z` must be in the range `[1, _N)` for the math trick with `ecrecover` to work.
+    ///      You must use public keys that have been checked with `FROST.isValidPublicKey(px, py)`,
+    ///      as not all public keys are suitable for verifying Schnorr signatures.
     /// @return signer The address of the public key point `P`, or `0` if
     /// signature verification failed.
     /// @custom:reference <https://datatracker.ietf.org/doc/html/rfc9591#section-6.5>
     /// @custom:reference <https://en.wikipedia.org/wiki/Schnorr_signature#Verifying>
+    /// @custom:reference <https://ethresear.ch/t/you-can-kinda-abuse-ecrecover-to-do-ecmul-in-secp256k1-today/2384/19>
     function verify(bytes32 message, uint256 px, uint256 py, uint256 rx, uint256 ry, uint256 z)
         internal
         view
@@ -277,12 +281,8 @@ library FROST {
         // to a curve scalar, there are some values of `z` that can be
         // specified in more than one way.
         {
-            // px must be in range [1, _N) because of ecrecover requirements
-            // px != 0 because of _isOnCurve(px, py) is false if px == 0
-            // (there is no point on the curve with x == 0)
             bool pOk = isValidPublicKey(px, py);
             bool rOk = _isOnCurve(rx, ry);
-            // z must be in range [1, _N) because of ecrecover requirements
             bool zOk = _isScalar(z);
             bool ok;
             assembly ("memory-safe") {
