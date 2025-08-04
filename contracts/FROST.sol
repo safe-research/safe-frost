@@ -294,15 +294,7 @@ library FROST {
             }
         }
 
-        // e must be in range [1, _N) because of ecrecover requirements
-        // e in range [0, _N) because of _hashToField
         uint256 e = _challenge(rx, ry, px, py, message);
-        //bool eOk = _isScalar(e);
-        bool eOk = e != 0;
-        if (!eOk) {
-            return address(0);
-        }
-
         unchecked {
             address minusR = _address(rx, _P - ry); // address(-R)
             address minusRv = _ecmulmuladd(z, px, py, e); // address(-z⋅G + e⋅P)
