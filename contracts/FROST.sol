@@ -54,7 +54,7 @@ library FROST {
     function _isOnCurve(uint256 x, uint256 y) private pure returns (bool result) {
         assembly ("memory-safe") {
             result :=
-                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _N)), and(lt(x, _P), lt(y, _P)))
+                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _P)), and(lt(x, _P), lt(y, _P)))
         }
     }
 
