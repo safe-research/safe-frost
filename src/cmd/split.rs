@@ -1,6 +1,6 @@
 use crate::{
     cmd::{self, Root},
-    hex,
+    evm, hex,
 };
 use argh::FromArgs;
 use std::{
@@ -33,18 +33,24 @@ pub struct Command {
 
 impl Command {
     pub fn run(self, root: Root) -> cmd::Result {
-        let mut rng = rand::thread_rng();
-        let secret = self
-            .secret_key
-            .unwrap_or_else(|| frost::SigningKey::new(&mut rng));
+        let mut shares;
+        let mut pubkey_package;
 
-        let (shares, pubkey_package) = frost::keys::split(
-            &secret,
-            self.signers,
-            self.threshold,
-            frost::keys::IdentifierList::Default,
-            &mut rng,
-        )?;
+        while {
+            let mut rng = rand::thread_rng();
+            let secret = self
+                .secret_key
+                .unwrap_or_else(|| frost::SigningKey::new(&mut rng));
+
+            (shares, pubkey_package) = frost::keys::split(
+                &secret,
+                self.signers,
+                self.threshold,
+                frost::keys::IdentifierList::Default,
+                &mut rng,
+            )?;
+            evm::verified_public_key(&pubkey_package).is_err()
+        } {}
 
         root.ensure()?;
         self.write(root.public_key(), &pubkey_package.serialize()?)?;

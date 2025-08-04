@@ -58,17 +58,6 @@ library FROST {
         }
     }
 
-    /// @notice Checks whether a point is on the curve and is a valid FROST public key.
-    /// @param x The x-coordinate of the point.
-    /// @param y The y-coordinate of the point.
-    /// @return result Whether the point is on the curve and is a valid FROST public key.
-    function isValidPublicKey(uint256 x, uint256 y) internal pure returns (bool result) {
-        assembly ("memory-safe") {
-            result :=
-                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _P)), and(lt(x, _N), lt(y, _P)))
-        }
-    }
-
     /// @notice Checks whether an integer is a valid curve scalar.
     /// @param a The integer to check.
     /// @return result Whether integer is a valid curve scalar in the range
@@ -93,6 +82,7 @@ library FROST {
     /// @param px The x-coordinate of the public key point `P`.
     /// @param py The y-coordinate of the public key point `P`.
     /// @param message The signed message.
+    /// @return preimage The pre-image bytes.
     /// @custom:reference <https://datatracker.ietf.org/doc/html/rfc9591#section-4.6>
     /// @custom:reference <https://secg.org/sec1-v2.pdf>
     function _preimage(uint256 rx, uint256 ry, uint256 px, uint256 py, bytes32 message)
@@ -209,7 +199,26 @@ library FROST {
         return _hashToField(_preimage(rx, ry, px, py, message), "FROST-secp256k1-SHA256-v1chal");
     }
 
+    /// @notice Checks whether a point is on the curve and is a supported FROST
+    /// public key.
+    /// @dev In addition to being a valid point of the curve, the `x`-coordinate
+    /// of the public key must be smaller than the curve order for the math trick
+    /// with `ecrecover` to work and supported by this verifier implementation.
+    /// @param x The x-coordinate of the point.
+    /// @param y The y-coordinate of the point.
+    /// @return result Whether the point is valid and supported.
+    function isValidPublicKey(uint256 x, uint256 y) internal pure returns (bool result) {
+        assembly ("memory-safe") {
+            result :=
+                and(eq(mulmod(y, y, _P), addmod(mulmod(x, mulmod(x, x, _P), _P), 7, _P)), and(lt(x, _N), lt(y, _P)))
+        }
+    }
+
     /// @notice Verify a FROST(secp256k1, SHA-256) Schnorr signature.
+    /// @dev Note that public key's x-coordinate `px` must be smaller than the
+    /// curve order for the math trick with `ecrecover` to work. You must use
+    /// public keys that have been checked with `FROST.isValidPublicKey(px, py)`,
+    /// as not all public keys are supported by this verifier implementation.
     /// @custom:note There is no restriction to the length of `message`, but we
     /// keep it to a constant 32 bytes in our implementation, since almost all
     /// on-chain signature verification uses 32-byte signing messages.
@@ -219,9 +228,6 @@ library FROST {
     /// @param px The x-coordinate of the public key point `P`.
     /// @param py The y-coordinate of the public key point `P`.
     /// @param z The z-scalar of the signature.
-    /// @dev Note that `x` and `z` must be in the range `[1, _N)` for the math trick with `ecrecover` to work.
-    ///      You must use public keys that have been checked with `FROST.isValidPublicKey(px, py)`,
-    ///      as not all public keys are suitable for verifying Schnorr signatures.
     /// @return signer The address of the public key point `P`, or `0` if
     /// signature verification failed.
     /// @custom:reference <https://datatracker.ietf.org/doc/html/rfc9591#section-6.5>
