@@ -280,7 +280,7 @@ library FROST {
             // px must be in range [1, _N) because of ecrecover requirements
             // px != 0 because of _isOnCurve(px, py) is false if px == 0
             // (there is no point on the curve with x == 0)
-            bool pOk = px < _N && _isOnCurve(px, py);
+            bool pOk = isValidPublicKey(px, py);
             bool rOk = _isOnCurve(rx, ry);
             // z must be in range [1, _N) because of ecrecover requirements
             bool zOk = _isScalar(z);
